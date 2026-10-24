@@ -39,6 +39,11 @@ function checkJoinRate(ip: string, code: string): void {
   if (recent.length >= 5) throw new HttpError(429, 'Too many join requests for this room. Try again in a minute.');
   recent.push(now);
   joinAttempts.set(key, recent);
+  if (joinAttempts.size > 5_000) {
+    for (const [candidate, times] of joinAttempts) {
+      if (!times.some((at) => now - at < 60_000)) joinAttempts.delete(candidate);
+    }
+  }
 }
 
 const authAttempts = new Map<string, number[]>();
@@ -214,6 +219,15 @@ function agentBriefing(
         request: `PATCH ${roomUrl}/tasks/<taskId>`,
         body: { status: 'doing' },
       },
+      listTasks: {
+        request: `GET ${roomUrl}/tasks?status=todo,doing&assignee=me`,
+        note: 'Filters: status, assignee (me, unassigned, user:ID, agent:ID), q, limit, offset.',
+      },
+      createTask: {
+        request: `POST ${roomUrl}/tasks`,
+        body: { title: 'Fix the login redirect', paths: 'web/src/App.tsx', clientTaskId: 'job-123' },
+        note: 'Reuse clientTaskId when retrying so the original task is returned, not a duplicate.',
+      },
     },
     firstStep: `Open ${socketUrl}, then send {"type":"message.send","content":"I'm connected."}. If you cannot hold a socket, use GET ${roomUrl} with Authorization: ${auth}.`,
     guide: `${origin}/agent-guide`,
@@ -251,7 +265,7 @@ router.post('/auth/register', (req, res) => {
     throw new HttpError(409, 'An account with that email already exists');
   }
   const user = store.createUser(body.name, body.email, hashPassword(body.password));
-  const token = signSessionToken(user.id);
+  const token = signSessionToken(user.id, user.session_version);
   setSessionCookie(res, token);
   res.status(201).json({
     token,
@@ -274,7 +288,7 @@ router.post('/auth/login', (req, res) => {
   if (!user || !verifyPassword(body.password, user.password_hash)) {
     throw new HttpError(401, 'Invalid email or password');
   }
-  const token = signSessionToken(user.id);
+  const token = signSessionToken(user.id, user.session_version);
   setSessionCookie(res, token);
   res.json({
     token,
@@ -684,8 +698,10 @@ router.patch('/me/password', (req, res) => {
   if (body.currentPassword === body.newPassword) {
     throw new HttpError(400, 'Choose a password different from the current one');
   }
-  store.updateUserPassword(principal.id, hashPassword(body.newPassword));
-  res.json({ ok: true });
+  const sessionVersion = store.updateUserPassword(principal.id, hashPassword(body.newPassword));
+  const token = signSessionToken(principal.id, sessionVersion);
+  setSessionCookie(res, token);
+  res.json({ ok: true, token });
 });
 
 function agentAdminRoom(agentId: string, principal: Principal): string {
@@ -1490,6 +1506,64 @@ const taskCreateSchema = z.object({
   repoId: z.string().nullable().optional(),
   assigneeType: z.enum(['user', 'agent']).nullable().optional(),
   assigneeId: z.string().nullable().optional(),
+  clientTaskId: z.string().trim().max(100).optional(),
+});
+
+const TASK_STATUS_SET = new Set<TaskStatus>(['todo', 'doing', 'review', 'done']);
+
+const taskListSchema = z.object({
+  status: z.string().trim().max(60).optional(),
+  assignee: z.string().trim().max(120).optional(),
+  q: z.string().trim().max(100).optional(),
+  limit: z.coerce.number().int().min(1).max(200).optional().default(100),
+  offset: z.coerce.number().int().min(0).max(100_000).optional().default(0),
+});
+
+router.get('/rooms/:roomId/tasks', (req, res) => {
+  const principal = principalOf(req as AuthedRequest);
+  membershipOrThrow(req.params.roomId, principal);
+  const query = taskListSchema.parse(req.query);
+
+  let statuses: TaskStatus[] | undefined;
+  if (query.status) {
+    statuses = query.status
+      .split(',')
+      .map((value) => value.trim())
+      .filter(Boolean) as TaskStatus[];
+    if (!statuses.length || statuses.some((status) => !TASK_STATUS_SET.has(status))) {
+      throw new HttpError(400, 'status must be one or more of todo, doing, review, done');
+    }
+  }
+
+  const filter: store.TaskPageQuery = { statuses, limit: query.limit, offset: query.offset };
+  if (query.assignee) {
+    if (query.assignee === 'me') {
+      filter.assigneeType = principal.type;
+      filter.assigneeId = principal.id;
+    } else if (query.assignee === 'unassigned') {
+      filter.unassigned = true;
+    } else {
+      const [type, ...rest] = query.assignee.split(':');
+      const id = rest.join(':');
+      if ((type !== 'user' && type !== 'agent') || !id) {
+        throw new HttpError(400, 'assignee must be "me", "unassigned", user:ID, or agent:ID');
+      }
+      filter.assigneeType = type;
+      filter.assigneeId = id;
+    }
+  }
+  if (query.q) filter.search = query.q;
+
+  const page = store.listTasksPage(req.params.roomId, filter);
+  res.json({ ...page, limit: query.limit, offset: query.offset });
+});
+
+router.get('/rooms/:roomId/tasks/:taskId', (req, res) => {
+  const principal = principalOf(req as AuthedRequest);
+  membershipOrThrow(req.params.roomId, principal);
+  const task = store.getTask(req.params.roomId, req.params.taskId);
+  if (!task) throw new HttpError(404, 'Task not found');
+  res.json(task);
 });
 
 const taskPatchSchema = z
@@ -1509,21 +1583,48 @@ router.post('/rooms/:roomId/tasks', (req, res) => {
   const principal = principalOf(req as AuthedRequest);
   writerOrThrow(req.params.roomId, principal);
   const body = taskCreateSchema.parse(req.body);
+  const clientTaskId = body.clientTaskId?.trim() || null;
+
+  if (clientTaskId) {
+    const existing = store.findTaskByClientId(
+      req.params.roomId,
+      principal.type,
+      principal.id,
+      clientTaskId,
+    );
+    if (existing) {
+      res.json(existing);
+      return;
+    }
+  }
+
   verifyAssignee(req.params.roomId, body.assigneeType ?? null, body.assigneeId ?? null);
   const repoId = attachRepo(req.params.roomId, body.repoId);
-  const task = store.createTask(
-    req.params.roomId,
-    {
-      title: body.title,
-      description: body.description,
-      paths: body.paths,
-      branch: body.branch,
-      repoId,
-      assigneeType: body.assigneeType ?? null,
-      assigneeId: body.assigneeId ?? null,
-    },
-    principal,
-  );
+  const input = {
+    title: body.title,
+    description: body.description,
+    paths: body.paths,
+    branch: body.branch,
+    repoId,
+    assigneeType: body.assigneeType ?? null,
+    assigneeId: body.assigneeId ?? null,
+    clientTaskId,
+  };
+
+  let task: ReturnType<typeof store.createTask>;
+  try {
+    task = store.createTask(req.params.roomId, input, principal);
+  } catch (error) {
+    const existing = clientTaskId
+      ? store.findTaskByClientId(req.params.roomId, principal.type, principal.id, clientTaskId)
+      : undefined;
+    if (existing) {
+      res.json(existing);
+      return;
+    }
+    throw error;
+  }
+
   const summary = task.assigneeName
     ? `${principal.name} assigned “${task.title}” to ${task.assigneeName}.`
     : `${principal.name} created task “${task.title}”.`;
@@ -1627,8 +1728,8 @@ router.delete('/rooms/:roomId/tasks/:taskId', (req, res) => {
 
   const isAdmin = membership.role === 'admin';
   const isCreator = task.createdByType === principal.type && task.createdById === principal.id;
-  if (!isAdmin && !isCreator && membership.role !== 'member') {
-    throw new HttpError(403, 'You do not have permission to delete this task');
+  if (!isAdmin && !isCreator) {
+    throw new HttpError(403, 'Only a room admin or the task creator can delete this task');
   }
 
   store.deleteTask(req.params.roomId, task.id);

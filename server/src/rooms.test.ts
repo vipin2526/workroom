@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { Principal } from './types.js';
 import { handleFromName, handleValidationError, normalizeHandle } from './handles.js';
+import { SlidingWindowLimiter } from './rate-limit.js';
 
 const store = await import('./store.js');
 const auth = await import('./auth.js');
@@ -135,10 +136,85 @@ test('password hashes can be verified and replaced', () => {
   assert.equal(auth.verifyPassword('password123', original), true);
   assert.equal(auth.verifyPassword('wrong-password', original), false);
 
+  const before = auth.signSessionToken(user.id, user.session_version);
+  assert.equal(auth.resolveToken(before)?.id, user.id);
+
   const nextHash = auth.hashPassword('new-password-456');
-  store.updateUserPassword(user.id, nextHash);
+  const version = store.updateUserPassword(user.id, nextHash);
+  assert.equal(version, 1);
+  assert.equal(auth.resolveToken(before), null);
+
   const stored = store.getUserPasswordHash(user.id);
   assert.ok(stored);
   assert.equal(auth.verifyPassword('new-password-456', stored), true);
   assert.equal(auth.verifyPassword('password123', stored), false);
+  assert.equal(auth.resolveToken(auth.signSessionToken(user.id, version))?.id, user.id);
+});
+
+test('sliding window limiter reports a retry delay instead of leaking counters', () => {
+  const limiter = new SlidingWindowLimiter(2, 1_000);
+  assert.equal(limiter.take('agent:room', 0), 0);
+  assert.equal(limiter.take('agent:room', 100), 0);
+  assert.equal(limiter.take('agent:room', 200), 1);
+  assert.equal(limiter.take('other', 200), 0);
+  assert.equal(limiter.take('agent:room', 1_100), 0);
+});
+
+test('task queries filter, paginate, search, and dedupe by client id', () => {
+  const room = store.createRoom('Task room', '', 'code', ownerPrincipal, 'public');
+  store.addMember(room.id, guestPrincipal, 'member');
+  const base = {
+    description: '',
+    paths: '',
+    branch: '',
+    repoId: null,
+    assigneeType: null,
+    assigneeId: null,
+  };
+  const login = store.createTask(
+    room.id,
+    { ...base, title: 'Fix login redirect', description: 'Honor ?next=', clientTaskId: 'job-1' },
+    ownerPrincipal,
+  );
+  const docs = store.createTask(
+    room.id,
+    { ...base, title: 'Review docs', assigneeType: 'user', assigneeId: guest.id, clientTaskId: 'job-2' },
+    ownerPrincipal,
+  );
+  const unassigned = store.createTask(
+    room.id,
+    { ...base, title: 'Triage inbox' },
+    guestPrincipal,
+  );
+  store.updateTaskFields(room.id, login.id, { status: 'doing' });
+
+  const doing = store.listTasksPage(room.id, { statuses: ['doing'], limit: 10, offset: 0 });
+  assert.equal(doing.total, 1);
+  assert.equal(doing.tasks[0].id, login.id);
+
+  const mine = store.listTasksPage(room.id, {
+    assigneeType: 'user',
+    assigneeId: guest.id,
+    limit: 10,
+    offset: 0,
+  });
+  assert.equal(mine.total, 1);
+  assert.equal(mine.tasks[0].id, docs.id);
+
+  const free = store.listTasksPage(room.id, { unassigned: true, limit: 10, offset: 0 });
+  assert.equal(free.total, 2);
+  assert.ok(free.tasks.some((task) => task.id === login.id));
+  assert.ok(free.tasks.some((task) => task.id === unassigned.id));
+
+  const search = store.listTasksPage(room.id, { search: 'login', limit: 10, offset: 0 });
+  assert.equal(search.total, 1);
+  assert.equal(search.tasks[0].id, login.id);
+
+  const paged = store.listTasksPage(room.id, { limit: 1, offset: 1 });
+  assert.equal(paged.total, 3);
+  assert.equal(paged.tasks.length, 1);
+
+  assert.equal(store.findTaskByClientId(room.id, 'user', owner.id, 'job-1')?.id, login.id);
+  assert.equal(store.findTaskByClientId(room.id, 'user', guest.id, 'job-1'), undefined);
+  assert.equal(login.clientTaskId, 'job-1');
 });

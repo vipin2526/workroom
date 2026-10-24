@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import type { ReactNode } from 'react';
 import type { PrincipalType, RoomState, VoiceParticipant } from '../lib/types';
 import type { VoiceController } from '../lib/useRoomVoice';
 import { avatarSrc } from '../lib/avatars';
@@ -19,6 +20,7 @@ interface VoiceStageProps {
   me: RoomState['me'];
   connected: boolean;
   onOpenProfile: (type: PrincipalType, id: string) => void;
+  emptyContent?: ReactNode;
 }
 
 interface RemoteAudioProps {
@@ -119,6 +121,7 @@ export function VoiceStage({
   me,
   connected,
   onOpenProfile,
+  emptyContent,
 }: VoiceStageProps) {
   const [devicesOpen, setDevicesOpen] = useState(false);
   const settingsRef = useRef<HTMLDivElement | null>(null);
@@ -218,8 +221,12 @@ export function VoiceStage({
         </div>
       </header>
 
-      <div className={`stage-body ${empty ? 'is-empty' : ''}`}>
-        {empty ? (
+      <div
+        className={`stage-body ${empty ? 'is-empty' : ''} ${empty && emptyContent ? 'has-cockpit' : ''}`}
+      >
+        {empty && emptyContent ? (
+          emptyContent
+        ) : empty ? (
           <div className="stage-empty">
             <span className={`stage-orb ${viewer ? 'dim' : ''}`}>
               <HeadphonesIcon size={30} />

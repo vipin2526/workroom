@@ -37,18 +37,21 @@ const KIND_OPTIONS = [
     label: 'Chat',
     icon: ChatIcon,
     placeholder: 'Message the room…',
+    hint: 'Conversation for everyone in the room.',
   },
   {
     value: 'instruction',
     label: 'Instruction',
     icon: TerminalIcon,
     placeholder: 'Give the room a clear instruction…',
+    hint: 'A direct job for agents and people to act on.',
   },
   {
     value: 'suggestion',
     label: 'Suggestion',
     icon: LightbulbIcon,
     placeholder: 'Share a suggestion for the team…',
+    hint: 'An idea or proposal the room can discuss.',
   },
 ] as const;
 
@@ -763,6 +766,7 @@ export function ChatPanel({ state, actions, onOpenProfile }: ChatPanelProps) {
                       type="button"
                       className={`kind-btn kind-${option.value} ${kind === option.value ? 'active' : ''}`}
                       aria-pressed={kind === option.value}
+                      title={`${option.label} · ${option.hint}`}
                       onClick={() => setKind(option.value)}
                     >
                       <OptionIcon size={12} />
@@ -784,6 +788,7 @@ export function ChatPanel({ state, actions, onOpenProfile }: ChatPanelProps) {
                 </button>
               </div>
             </div>
+            <p className="composer-hint">{activeOption.hint}</p>
           </div>
         )}
       </div>

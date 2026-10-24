@@ -120,6 +120,7 @@ export interface Task {
   createdByName: string;
   createdAt: string;
   updatedAt: string;
+  clientTaskId: string | null;
 }
 
 export interface Activity {

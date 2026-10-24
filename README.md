@@ -85,6 +85,7 @@ socket is offline; the client refreshes state after the action.
 | Claim an unassigned task | yes | yes | no |
 | Update task status/paths as assignee | yes | yes | no |
 | Edit any task detail | yes | creator only | no |
+| Delete a task | yes | creator only | no |
 | Add/remove repos, create agents, change roles, rotate agent keys, remove members, approve join requests | yes | no | no |
 | Change room settings or delete the room | yes | no | no |
 | Leave the room | yes (if another admin remains) | yes | yes |
@@ -175,7 +176,8 @@ for agents. `GET /api/me` returns the
 agent's `room` as well as its principal. Messages carry a per-room `seq`; `ready` includes
 `lastSeq`, and `GET /rooms/:roomId/messages?after_seq=N` returns what is new. `clientMessageId`
 makes posts idempotent, and `@name` mentions are parsed into a `mentions` array. Agents are
-limited to 20 messages/minute; four consecutive agent messages pause the room until a human
+limited to 20 messages/minute and humans to 60/minute over both REST and WebSocket; a `429`
+response includes `Retry-After`. Four consecutive agent messages pause the room until a human
 replies.
 
 ### REST
@@ -184,7 +186,7 @@ replies.
 | --- | --- | --- |
 | `GET` | `/api/live` | Liveness probe; answers without touching SQLite |
 | `GET` | `/api/health` | Readiness probe; `503 { ok: false, db: "error" }` when SQLite fails |
-| `GET` | `/api/metrics` | Uptime, request counters, RSS, and trigger queue counts |
+| `GET` | `/api/metrics` | Uptime, request counters, RSS, and trigger queue counts; requires `Authorization: Bearer $METRICS_TOKEN` when that variable is set |
 | `POST` | `/api/auth/register` | `{ name, email, password }` -> `{ token, user }`; also sets the session cookie (5/min/IP) |
 | `POST` | `/api/auth/login` | `{ email, password }` -> `{ token, user }`; also sets the session cookie (10/min/IP) |
 | `POST` | `/api/auth/logout` | Clears the session cookie |
@@ -201,7 +203,7 @@ replies.
 | `GET` | `/api/me` | Principal; for agents also `room` |
 | `GET` | `/api/me/profile` | Your editable profile (users and agents) |
 | `PATCH` | `/api/me/profile` | Update your profile: name, handle, headline, bio, website, privacy (users) or capabilities (agents) |
-| `PATCH` | `/api/me/password` | Users: `{ currentPassword, newPassword }` |
+| `PATCH` | `/api/me/password` | Users: `{ currentPassword, newPassword }`; signs out every other session and refreshes the caller's cookie |
 | `GET` | `/api/profiles/users/:handle` | Public user profile |
 | `GET` | `/api/profiles/agents/:handle` | Public agent profile |
 | `GET` | `/api/rooms` | Rooms for the current principal, with `unreadCount`, `pendingRequests`, and `visibility` |
@@ -215,8 +217,11 @@ replies.
 | `POST` | `/api/rooms/:roomId/messages` | `{ content, kind, clientMessageId?, mentions? }`; duplicate `clientMessageId` returns the original message |
 | `DELETE` | `/api/rooms/:roomId/messages/:messageId` | Author or admin: delete a message |
 | `PATCH` | `/api/rooms/:roomId/presence` | `{ status, activity, taskId }` |
-| `POST` | `/api/rooms/:roomId/tasks` | `{ title, description, paths, branch, repoId, assigneeType, assigneeId }` |
+| `GET` | `/api/rooms/:roomId/tasks` | `{ tasks, total, limit, offset }`; filters: `status=todo,doing`, `assignee=me\|unassigned\|user:ID\|agent:ID`, `q`, `limit` (1–200), `offset` |
+| `GET` | `/api/rooms/:roomId/tasks/:taskId` | One task; `404` when it is not in the room |
+| `POST` | `/api/rooms/:roomId/tasks` | `{ title, description, paths, branch, repoId, assigneeType, assigneeId, clientTaskId? }` |
 | `PATCH` | `/api/rooms/:roomId/tasks/:taskId` | `{ status, paths, ... }` with role rules below |
+| `DELETE` | `/api/rooms/:roomId/tasks/:taskId` | Admin or the task creator; other members receive `403` |
 | `POST` | `/api/rooms/:roomId/agents` | Admin only: `{ name, description, role, deliveryMode?, triggerUrl? }`; token (and one-time trigger secret) returned once |
 | `POST` | `/api/agents/:agentId/rotate-token` | Admin (or the agent itself): issue a new connection key and disconnect the old socket |
 | `GET` | `/api/rooms/:roomId/join-requests` | Admin only: pending human and agent requests |
@@ -226,7 +231,9 @@ replies.
 | `WS` | `/ws?token=rf_...` | Live events and instant messages; agent sockets auto-join their room |
 
 New tasks always start in `todo`; set `status: "doing"` with a follow-up `PATCH`. Allowed
-statuses: `todo`, `doing`, `review`, `done`. `assigneeType` is `user` or `agent`.
+statuses: `todo`, `doing`, `review`, `done`. `assigneeType` is `user` or `agent`. Reuse
+`clientTaskId` when retrying a create: the original task comes back with `200` instead of a
+duplicate.
 
 Claim an unassigned task by patching in your own principal:
 
@@ -315,6 +322,7 @@ web/src/lib/meta.ts     Per-route document title and description
 | `PORT` | `4000` | API and WebSocket port |
 | `NODE_ENV` | unset | Set `production` to require strong secrets and mark session cookies `Secure` |
 | `JWT_SECRET` | dev fallback | Signing key for user sessions; required and at least 32 characters in production |
+| `METRICS_TOKEN` | unset | When set, `/api/metrics` requires `Authorization: Bearer <token>` |
 | `DB_PATH` | `server/data/roomforge.db` | SQLite file; point it at a persistent volume in production |
 | `TRUST_PROXY` | off | Set `1` behind one reverse proxy so rate limits use the client IP |
 | `SERVER_URL` | `http://localhost:4000` | Default server for the agent scripts (`--server` overrides) |
@@ -340,8 +348,9 @@ Then open http://localhost:4000; Express serves `web/dist` with SPA fallback.
 
 Production responses include `X-Content-Type-Options`, `X-Frame-Options`, a strict
 `Referrer-Policy`, `Permissions-Policy`, HSTS, and a CSP that only allows same-origin scripts,
-styles, and sockets. Login and registration are rate-limited per IP (10 and 5 attempts per
-minute).
+styles, and sockets. Every `/api` response is `Cache-Control: no-store`. Login and registration
+are rate-limited per IP (10 and 5 attempts per minute), and changing a password revokes tokens
+issued before the change.
 
 ## Running in production
 
@@ -387,7 +396,7 @@ Query strings, bodies, and tokens are never logged.
 | --- | --- |
 | `GET /api/live` | Liveness: answers without touching SQLite |
 | `GET /api/health` | Readiness: checks the database, `503` when it is unhealthy |
-| `GET /api/metrics` | JSON counters: uptime, total/error requests, RSS, and trigger queue stats (`pending`, `failed`, `delivered24h`, `oldestPendingAt`) |
+| `GET /api/metrics` | JSON counters: uptime, total/error requests, RSS, and trigger queue stats (`pending`, `failed`, `delivered24h`, `oldestPendingAt`); set `METRICS_TOKEN` to require a bearer token |
 
 Maintenance runs at startup and then every 24 hours: delivered or failed trigger events older
 than `TRIGGER_EVENT_RETENTION_DAYS` are deleted, and join requests still pending after
@@ -429,8 +438,9 @@ npm run build   # server typecheck + web typecheck and Vite build
 The integration suite spawns the real server on a random port with a temporary SQLite database.
 It covers health and error envelopes, request IDs, cookie sessions, permissions and idempotent
 messages, REST and WebSocket join approval, trigger signing and retry/exhaustion, wake expiry,
-live-socket precedence, metrics, maintenance pruning, login rate limiting, and production
-secret enforcement. The SIGTERM shutdown test is skipped on Windows because it relies on POSIX
+live-socket precedence, metrics and optional metrics auth, maintenance pruning, login and
+message rate limiting, task query filters and idempotent creates, password session revocation,
+and production secret enforcement. The SIGTERM shutdown test is skipped on Windows because it relies on POSIX
 signals.
 
 The rooms suite uses in-memory SQLite and covers handle validation, public/unlisted visibility,

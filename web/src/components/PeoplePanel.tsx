@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
 import type {
   CreateAgentResult,
@@ -32,6 +32,7 @@ interface PeoplePanelProps {
   state: RoomState;
   actions: RoomActions;
   onOpenProfile: (type: PrincipalType, id: string) => void;
+  openFormNonce?: number;
 }
 
 function requestedAt(value: string): string {
@@ -45,7 +46,12 @@ function requestedAt(value: string): string {
   });
 }
 
-export function PeoplePanel({ state, actions, onOpenProfile }: PeoplePanelProps) {
+export function PeoplePanel({
+  state,
+  actions,
+  onOpenProfile,
+  openFormNonce,
+}: PeoplePanelProps) {
   const isAdmin = state.me.role === 'admin';
   const [error, setError] = useState<string | null>(null);
   const [agentOpen, setAgentOpen] = useState(false);
@@ -64,6 +70,12 @@ export function PeoplePanel({ state, actions, onOpenProfile }: PeoplePanelProps)
   const [rotatedKey, setRotatedKey] = useState<{ agentId: string; token: string } | null>(null);
   const [rotatingKey, setRotatingKey] = useState<string | null>(null);
   const [profileAgent, setProfileAgent] = useState<Member | null>(null);
+
+  useEffect(() => {
+    if (openFormNonce === undefined || !isAdmin) return;
+    setError(null);
+    setAgentOpen(true);
+  }, [openFormNonce, isAdmin]);
 
   const pendingRequests = state.joinRequests ?? [];
   const presenceById = new Map(state.presence.map((entry) => [`${entry.type}:${entry.id}`, entry]));

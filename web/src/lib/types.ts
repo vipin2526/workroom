@@ -15,6 +15,7 @@ export type PresenceStatus =
   | 'unreachable';
 export type DeliveryMode = 'socket' | 'trigger';
 export type WorkspaceTab = 'people' | 'tasks' | 'repos' | 'activity';
+export type WorkspacePanelIntent = 'new-task' | 'new-agent';
 
 export interface ProfileTarget {
   type: PrincipalType;

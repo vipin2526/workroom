@@ -27,8 +27,8 @@ export function verifyPassword(password: string, hash: string): boolean {
   return bcrypt.compareSync(password, hash);
 }
 
-export function signSessionToken(userId: string): string {
-  return jwt.sign({}, SECRET, { subject: userId, expiresIn: '7d' });
+export function signSessionToken(userId: string, sessionVersion = 0): string {
+  return jwt.sign({ ver: sessionVersion }, SECRET, { subject: userId, expiresIn: '7d' });
 }
 
 export function newAgentToken(): string {
@@ -60,23 +60,30 @@ export function resolveToken(token: string): Principal | null {
   }
 
   try {
-    const payload = jwt.verify(token, SECRET) as { sub?: string };
+    const payload = jwt.verify(token, SECRET) as { sub?: string; ver?: number };
     if (!payload.sub) return null;
     const user = db
-      .prepare('SELECT id, name, email, handle, avatar FROM users WHERE id = ?')
+      .prepare('SELECT id, name, email, handle, avatar, session_version FROM users WHERE id = ?')
       .get(payload.sub) as
-      | { id: string; name: string; email: string; handle: string | null; avatar: string | null }
-      | undefined;
-    return user
-      ? {
-          type: 'user',
-          id: user.id,
-          name: user.name,
-          email: user.email,
-          ...(user.handle ? { handle: user.handle } : {}),
-          ...(user.avatar ? { avatar: user.avatar } : {}),
+      | {
+          id: string;
+          name: string;
+          email: string;
+          handle: string | null;
+          avatar: string | null;
+          session_version: number;
         }
-      : null;
+      | undefined;
+    if (!user) return null;
+    if (Number(user.session_version ?? 0) !== Number(payload.ver ?? 0)) return null;
+    return {
+      type: 'user',
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      ...(user.handle ? { handle: user.handle } : {}),
+      ...(user.avatar ? { avatar: user.avatar } : {}),
+    };
   } catch {
     return null;
   }

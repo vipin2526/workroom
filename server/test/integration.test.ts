@@ -68,7 +68,10 @@ async function waitFor<T>(
   throw new Error(`${label} timed out${lastError ? `: ${String(lastError)}` : ''}`);
 }
 
-async function startServer(dbPath: string): Promise<TestServer> {
+async function startServer(
+  dbPath: string,
+  extraEnv: Record<string, string> = {},
+): Promise<TestServer> {
   const port = await freePort();
   const child = spawn(process.execPath, ['--import', 'tsx', 'src/index.ts'], {
     cwd: serverDir,
@@ -83,6 +86,7 @@ async function startServer(dbPath: string): Promise<TestServer> {
       WAKE_TIMEOUT_MS: '1500',
       TRIGGER_RETRY_DELAYS: '100,100,100',
       MAINTENANCE_INTERVAL_MS: '500',
+      ...extraEnv,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -179,7 +183,13 @@ function wsCollector(ws: WebSocket) {
 }
 
 async function openWs(url: string, headers?: Record<string, string>): Promise<WebSocket> {
+  const { ws } = await openWsWithInbox(url, headers);
+  return ws;
+}
+
+async function openWsWithInbox(url: string, headers?: Record<string, string>) {
   const ws = new WebSocket(url, headers ? { headers } : undefined);
+  const inbox = wsCollector(ws);
   await new Promise<void>((resolveOpen, reject) => {
     const timer = setTimeout(() => reject(new Error('websocket open timed out')), 10_000);
     ws.once('open', () => {
@@ -191,7 +201,7 @@ async function openWs(url: string, headers?: Record<string, string>): Promise<We
       reject(error);
     });
   });
-  return ws;
+  return { ws, inbox };
 }
 
 async function closeWs(ws: WebSocket): Promise<void> {
@@ -252,6 +262,7 @@ test('health and error envelopes', async () => {
   assert.equal(health.status, 200);
   assert.equal(health.body.ok, true);
   assert.equal(health.body.db, 'ok');
+  assert.equal(health.headers.get('cache-control'), 'no-store');
 
   const unauthenticated = await api(server.base, '/does-not-exist');
   assert.equal(unauthenticated.status, 401);
@@ -478,6 +489,241 @@ test('browser sessions use an HttpOnly cookie', async () => {
   assert.match(logout.headers.get('set-cookie') ?? '', /Max-Age=0/);
 });
 
+test('password changes revoke other sessions and keep the current one', async () => {
+  const email = `rotate-${RUN_ID}@test.local`;
+  const registered = await api(server.base, '/auth/register', {
+    method: 'POST',
+    body: { name: 'RotationUser', email, password: 'correct-horse' },
+  });
+  assert.equal(registered.status, 201);
+  const firstToken = registered.body.token;
+
+  const login = await api(server.base, '/auth/login', {
+    method: 'POST',
+    body: { email, password: 'correct-horse' },
+  });
+  assert.equal(login.status, 200);
+  const secondToken = login.body.token;
+
+  const changed = await api(server.base, '/me/password', {
+    method: 'PATCH',
+    token: firstToken,
+    body: { currentPassword: 'correct-horse', newPassword: 'new-correct-horse' },
+  });
+  assert.equal(changed.status, 200);
+  assert.ok(changed.body.token);
+  assert.match(changed.headers.get('set-cookie') ?? '', /rf_session=/);
+
+  for (const stale of [firstToken, secondToken]) {
+    const me = await api(server.base, '/me', { token: stale });
+    assert.equal(me.status, 401, 'a token issued before the password change must be rejected');
+  }
+
+  const refreshed = await api(server.base, '/me', { token: changed.body.token });
+  assert.equal(refreshed.status, 200);
+  assert.equal(refreshed.body.principal.name, 'RotationUser');
+
+  const oldPassword = await api(server.base, '/auth/login', {
+    method: 'POST',
+    body: { email, password: 'correct-horse' },
+  });
+  assert.equal(oldPassword.status, 401);
+
+  const newPassword = await api(server.base, '/auth/login', {
+    method: 'POST',
+    body: { email, password: 'new-correct-horse' },
+  });
+  assert.equal(newPassword.status, 200);
+});
+
+test('task queries filter and idempotent creates return the original task', async () => {
+  const taskAgent = await createAgent({ name: 'TaskBot', role: 'member' });
+  const viewerAgent = await createAgent({ name: 'TaskViewer', role: 'viewer' });
+  const replayKey = `task-${RUN_ID}`;
+
+  const created = await api(server.base, `/rooms/${roomId}/tasks`, {
+    method: 'POST',
+    token: adminToken,
+    body: {
+      title: 'Ship task filters',
+      description: 'Find work quickly',
+      clientTaskId: replayKey,
+    },
+  });
+  assert.equal(created.status, 201);
+  assert.equal(created.body.clientTaskId, replayKey);
+
+  const replay = await api(server.base, `/rooms/${roomId}/tasks`, {
+    method: 'POST',
+    token: adminToken,
+    body: { title: 'Duplicate title', clientTaskId: replayKey },
+  });
+  assert.equal(replay.status, 200);
+  assert.equal(replay.body.id, created.body.id);
+  assert.equal(replay.body.title, 'Ship task filters');
+
+  const agentTask = await api(server.base, `/rooms/${roomId}/tasks`, {
+    method: 'POST',
+    token: taskAgent.token,
+    body: {
+      title: 'Agent follow-up',
+      description: 'Assigned to the bot',
+      assigneeType: 'agent',
+      assigneeId: taskAgent.agent.id,
+      clientTaskId: `agent-${RUN_ID}`,
+    },
+  });
+  assert.equal(agentTask.status, 201);
+
+  const list = await api(server.base, `/rooms/${roomId}/tasks?limit=100`, { token: adminToken });
+  assert.equal(list.status, 200);
+  assert.ok(list.body.total >= 2);
+  assert.ok(list.body.tasks.some((task: any) => task.id === created.body.id));
+
+  const byStatus = await api(server.base, `/rooms/${roomId}/tasks?status=todo&limit=100`, {
+    token: adminToken,
+  });
+  assert.equal(byStatus.status, 200);
+  assert.ok(byStatus.body.tasks.every((task: any) => task.status === 'todo'));
+
+  const byAssignee = await api(server.base, `/rooms/${roomId}/tasks?assignee=me`, {
+    token: taskAgent.token,
+  });
+  assert.equal(byAssignee.status, 200);
+  assert.equal(byAssignee.body.tasks.length, 1);
+  assert.equal(byAssignee.body.tasks[0].id, agentTask.body.id);
+
+  const unassigned = await api(server.base, `/rooms/${roomId}/tasks?assignee=unassigned`, {
+    token: adminToken,
+  });
+  assert.equal(unassigned.status, 200);
+  assert.ok(unassigned.body.tasks.some((task: any) => task.id === created.body.id));
+  assert.ok(!unassigned.body.tasks.some((task: any) => task.id === agentTask.body.id));
+
+  const search = await api(
+    server.base,
+    `/rooms/${roomId}/tasks?q=${encodeURIComponent('follow-up')}`,
+    { token: adminToken },
+  );
+  assert.equal(search.status, 200);
+  assert.equal(search.body.total, 1);
+  assert.equal(search.body.tasks[0].id, agentTask.body.id);
+
+  const single = await api(server.base, `/rooms/${roomId}/tasks/${created.body.id}`, {
+    token: viewerAgent.token,
+  });
+  assert.equal(single.status, 200);
+  assert.equal(single.body.id, created.body.id);
+
+  const outsider = await api(server.base, `/rooms/${roomId}/tasks`, { token: memberToken });
+  assert.equal(outsider.status, 404);
+
+  const viewerRead = await api(server.base, `/rooms/${roomId}/tasks`, { token: viewerAgent.token });
+  assert.equal(viewerRead.status, 200);
+  const viewerWrite = await api(server.base, `/rooms/${roomId}/tasks`, {
+    method: 'POST',
+    token: viewerAgent.token,
+    body: { title: 'Should not land' },
+  });
+  assert.equal(viewerWrite.status, 403);
+
+  const badStatus = await api(server.base, `/rooms/${roomId}/tasks?status=blocked`, {
+    token: adminToken,
+  });
+  assert.equal(badStatus.status, 400);
+
+  const paged = await api(server.base, `/rooms/${roomId}/tasks?limit=1&offset=1`, {
+    token: adminToken,
+  });
+  assert.equal(paged.status, 200);
+  assert.equal(paged.body.tasks.length, 1);
+  assert.equal(paged.body.total, 2);
+
+  const foreignDelete = await api(server.base, `/rooms/${roomId}/tasks/${created.body.id}`, {
+    method: 'DELETE',
+    token: taskAgent.token,
+  });
+  assert.equal(foreignDelete.status, 403, 'a member cannot delete a task they did not create');
+
+  const ownDelete = await api(server.base, `/rooms/${roomId}/tasks/${agentTask.body.id}`, {
+    method: 'DELETE',
+    token: taskAgent.token,
+  });
+  assert.equal(ownDelete.status, 200, 'the creator can delete their own task');
+
+  const removed = await api(server.base, `/rooms/${roomId}/tasks/${created.body.id}`, {
+    method: 'DELETE',
+    token: adminToken,
+  });
+  assert.equal(removed.status, 200, 'an admin can delete any task');
+});
+
+test('HTTP message posts share the agent rate limit', async () => {
+  const created = await api(server.base, '/rooms', {
+    method: 'POST',
+    token: adminToken,
+    body: { name: `Rate room ${RUN_ID}`, mode: 'chat' },
+  });
+  assert.equal(created.status, 201);
+  const rateRoomId = created.body.room.id;
+
+  const agent = await api(server.base, `/rooms/${rateRoomId}/agents`, {
+    method: 'POST',
+    token: adminToken,
+    body: { name: 'RateBot', role: 'member' },
+  });
+  assert.equal(agent.status, 201);
+
+  for (let index = 0; index < 20; index += 1) {
+    const agentPost = await api(server.base, `/rooms/${rateRoomId}/messages`, {
+      method: 'POST',
+      token: agent.body.token,
+      body: { content: `step ${index}`, clientMessageId: `rate-${RUN_ID}-${index}` },
+    });
+    assert.equal(agentPost.status, 201, JSON.stringify(agentPost.body));
+
+    const humanPost = await api(server.base, `/rooms/${rateRoomId}/messages`, {
+      method: 'POST',
+      token: adminToken,
+      body: { content: `ack ${index}` },
+    });
+    assert.equal(humanPost.status, 201);
+  }
+
+  const limited = await api(server.base, `/rooms/${rateRoomId}/messages`, {
+    method: 'POST',
+    token: agent.body.token,
+    body: { content: 'one too many' },
+  });
+  assert.equal(limited.status, 429);
+  assert.equal(limited.body.error, 'rate_limited');
+  const retryAfter = Number(limited.headers.get('retry-after'));
+  assert.ok(Number.isInteger(retryAfter) && retryAfter >= 1 && retryAfter <= 60);
+
+  const removed = await api(server.base, `/rooms/${rateRoomId}`, {
+    method: 'DELETE',
+    token: adminToken,
+  });
+  assert.equal(removed.status, 200);
+});
+
+test('metrics can require a bearer token', async () => {
+  const secured = await startServer(join(tempDir, 'metrics.db'), { METRICS_TOKEN: 'metrics-secret' });
+  try {
+    const denied = await api(secured.base, '/metrics');
+    assert.equal(denied.status, 401);
+
+    const wrong = await api(secured.base, '/metrics', { token: 'wrong-secret' });
+    assert.equal(wrong.status, 401);
+
+    const allowed = await api(secured.base, '/metrics', { token: 'metrics-secret' });
+    assert.equal(allowed.status, 200);
+    assert.equal(allowed.body.ok, true);
+  } finally {
+    await stopServer(secured);
+  }
+});
+
 test('profile pictures are assigned automatically and can be changed', async () => {
   const initial = await roomState();
   assert.match(String(initial.me.avatar), AVATAR_PATTERN);
@@ -663,8 +909,9 @@ test('agent join socket is promoted on approval', async () => {
   assert.equal(join.status, 202);
   const key = join.body.request.key as string;
 
-  const ws = await openWs(`${server.base.replace('http', 'ws')}/ws?join=${encodeURIComponent(key)}`);
-  const inbox = wsCollector(ws);
+  const { ws, inbox } = await openWsWithInbox(
+    `${server.base.replace('http', 'ws')}/ws?join=${encodeURIComponent(key)}`,
+  );
   try {
     await inbox.waitFor('join.pending');
 

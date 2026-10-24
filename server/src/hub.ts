@@ -3,6 +3,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import type { RawData } from 'ws';
 import { readSessionToken, resolveToken } from './auth.js';
 import { HttpError } from './errors.js';
+import { SlidingWindowLimiter } from './rate-limit.js';
 import * as store from './store.js';
 import type {
   Member,
@@ -50,7 +51,6 @@ const pendingClients = new Map<WebSocket, PendingClient>();
 const presence = new Map<string, Map<string, LivePresence>>();
 const voiceRooms = new Map<string, Map<string, VoiceSession>>();
 const agentSockets = new Map<string, WebSocket>();
-const agentMessageTimes = new Map<string, number[]>();
 const pausedRooms = new Set<string>();
 const typingRooms = new Map<
   string,
@@ -520,8 +520,11 @@ function markOfflineIfGone(roomId: string, principal: Principal): void {
 /* --------------------------- message pipeline ---------------------------- */
 
 const AGENT_MESSAGES_PER_MINUTE = 20;
-const AGENT_RATE_WINDOW_MS = 60_000;
+const USER_MESSAGES_PER_MINUTE = 60;
+const MESSAGE_RATE_WINDOW_MS = 60_000;
 const LOOP_WINDOW = 4;
+const agentMessageLimiter = new SlidingWindowLimiter(AGENT_MESSAGES_PER_MINUTE, MESSAGE_RATE_WINDOW_MS);
+const userMessageLimiter = new SlidingWindowLimiter(USER_MESSAGES_PER_MINUTE, MESSAGE_RATE_WINDOW_MS);
 
 function collectMentions(roomId: string, content: string, explicit: Mention[]): Mention[] {
   const members = store.listMembers(roomId);
@@ -541,7 +544,20 @@ function collectMentions(roomId: string, content: string, explicit: Mention[]): 
   return [...found.values()];
 }
 
-function enforceAgentSend(roomId: string, agentId: string): void {
+function enforceMessageRate(roomId: string, principal: Principal): void {
+  const limiter = principal.type === 'agent' ? agentMessageLimiter : userMessageLimiter;
+  const retryAfterSeconds = limiter.take(`${roomId}:${principal.type}:${principal.id}`);
+  if (!retryAfterSeconds) return;
+  throw new HttpError(
+    429,
+    principal.type === 'agent'
+      ? 'rate_limited'
+      : 'You are sending messages too quickly. Try again in a moment.',
+    { retryAfterSeconds },
+  );
+}
+
+function enforceAgentSend(roomId: string): void {
   if (pausedRooms.has(roomId)) throw new HttpError(429, 'loop_guard');
 
   const last = store.latestMessages(roomId, LOOP_WINDOW);
@@ -552,12 +568,6 @@ function enforceAgentSend(roomId: string, agentId: string): void {
     broadcastUnread(roomId);
     throw new HttpError(429, 'loop_guard');
   }
-
-  const now = Date.now();
-  const recent = (agentMessageTimes.get(agentId) ?? []).filter((at) => now - at < AGENT_RATE_WINDOW_MS);
-  if (recent.length >= AGENT_MESSAGES_PER_MINUTE) throw new HttpError(429, 'rate_limited');
-  recent.push(now);
-  agentMessageTimes.set(agentId, recent);
 }
 
 /* A live socket wins and never receives a trigger. A sleeping trigger-mode agent
@@ -593,7 +603,8 @@ export function createRoomMessage(input: CreateRoomMessageInput): { message: Mes
     if (existing) return { message: existing, duplicate: true };
   }
 
-  if (input.principal.type === 'agent') enforceAgentSend(input.roomId, input.principal.id);
+  if (input.principal.type === 'agent') enforceAgentSend(input.roomId);
+  enforceMessageRate(input.roomId, input.principal);
 
   const mentions = collectMentions(input.roomId, input.content, input.explicitMentions ?? []);
   const message = store.insertMessage(
@@ -728,7 +739,9 @@ function handleMessageSend(client: Client, payload: Record<string, unknown>): vo
         message:
           error.message === 'loop_guard'
             ? 'Agents are paused until a human replies.'
-            : 'Agent message rate limit reached (20 per minute).',
+            : client.principal.type === 'agent'
+              ? 'Agent message rate limit reached (20 per minute).'
+              : 'You are sending messages too quickly. Try again in a moment.',
       });
       return;
     }

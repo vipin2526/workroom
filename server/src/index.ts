@@ -53,6 +53,7 @@ app.use((req, res, next) => {
     next();
     return;
   }
+  res.set('Cache-Control', 'no-store');
   const incoming = req.get('x-request-id');
   const requestId = incoming && /^[A-Za-z0-9_-]{8,128}$/.test(incoming) ? incoming : randomUUID();
   res.locals.requestId = requestId;
@@ -96,7 +97,13 @@ app.get('/api/live', (_req, res) => {
   res.json({ ok: true, uptime: Math.round(process.uptime()) });
 });
 
-app.get('/api/metrics', (_req, res) => {
+const metricsToken = process.env.METRICS_TOKEN?.trim() ?? '';
+
+app.get('/api/metrics', (req, res) => {
+  if (metricsToken && req.get('authorization') !== `Bearer ${metricsToken}`) {
+    res.status(401).json({ error: 'Unauthorized' });
+    return;
+  }
   const healthy = isDbHealthy();
   let trigger: store.TriggerQueueStats | null = null;
   if (healthy) {
@@ -144,6 +151,7 @@ app.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {
     return;
   }
   if (error instanceof HttpError) {
+    if (error.retryAfterSeconds) res.set('Retry-After', String(error.retryAfterSeconds));
     res.status(error.status).json({ error: error.message });
     return;
   }

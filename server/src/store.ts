@@ -59,6 +59,7 @@ export interface UserRow {
   website: string;
   show_rooms: number;
   avatar: string | null;
+  session_version: number;
 }
 
 export function createUser(name: string, email: string, passwordHash: string): UserRow {
@@ -75,6 +76,7 @@ export function createUser(name: string, email: string, passwordHash: string): U
     website: '',
     show_rooms: 1,
     avatar: pickAvatar(),
+    session_version: 0,
   };
   db.prepare(
     `INSERT INTO users (id, email, name, password_hash, created_at, handle, avatar)
@@ -169,8 +171,13 @@ export function getUserPasswordHash(userId: string): string | undefined {
   return row?.password_hash;
 }
 
-export function updateUserPassword(userId: string, passwordHash: string): void {
-  db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(passwordHash, userId);
+export function updateUserPassword(userId: string, passwordHash: string): number {
+  const row = db
+    .prepare(
+      'UPDATE users SET password_hash = ?, session_version = session_version + 1 WHERE id = ? RETURNING session_version',
+    )
+    .get(passwordHash, userId) as { session_version: number } | undefined;
+  return Number(row?.session_version ?? 0);
 }
 
 export function listPrincipalRoomIds(type: PrincipalType, id: string): string[] {
@@ -1285,6 +1292,7 @@ function mapTask(row: Row): Task {
     createdByName: row.created_by_name,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    clientTaskId: row.client_task_id ?? null,
   };
 }
 
@@ -1313,6 +1321,7 @@ export interface NewTaskInput {
   repoId: string | null;
   assigneeType: PrincipalType | null;
   assigneeId: string | null;
+  clientTaskId?: string | null;
 }
 
 export function createTask(roomId: string, input: NewTaskInput, creator: Principal): Task {
@@ -1320,8 +1329,9 @@ export function createTask(roomId: string, input: NewTaskInput, creator: Princip
   const timestamp = nowIso();
   db.prepare(
     `INSERT INTO tasks (id, room_id, repo_id, title, description, paths, branch, status,
-                        assignee_type, assignee_id, created_by_type, created_by_id, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 'todo', ?, ?, ?, ?, ?, ?)`,
+                        assignee_type, assignee_id, created_by_type, created_by_id, created_at, updated_at,
+                        client_task_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'todo', ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     id,
     roomId,
@@ -1336,8 +1346,73 @@ export function createTask(roomId: string, input: NewTaskInput, creator: Princip
     creator.id,
     timestamp,
     timestamp,
+    input.clientTaskId ?? null,
   );
   return getTask(roomId, id)!;
+}
+
+export function findTaskByClientId(
+  roomId: string,
+  creatorType: PrincipalType,
+  creatorId: string,
+  clientTaskId: string,
+): Task | undefined {
+  const row = db
+    .prepare(
+      `${TASK_SELECT}
+       WHERE t.room_id = ? AND t.created_by_type = ? AND t.created_by_id = ? AND t.client_task_id = ?`,
+    )
+    .get(roomId, creatorType, creatorId, clientTaskId) as Row | undefined;
+  return row ? mapTask(row) : undefined;
+}
+
+export interface TaskPageQuery {
+  statuses?: TaskStatus[];
+  assigneeType?: PrincipalType | null;
+  assigneeId?: string | null;
+  unassigned?: boolean;
+  search?: string;
+  limit: number;
+  offset: number;
+}
+
+export function listTasksPage(
+  roomId: string,
+  query: TaskPageQuery,
+): { tasks: Task[]; total: number } {
+  const where = ['t.room_id = ?'];
+  const values: (string | number)[] = [roomId];
+
+  if (query.statuses?.length) {
+    where.push(`t.status IN (${query.statuses.map(() => '?').join(', ')})`);
+    values.push(...query.statuses);
+  }
+  if (query.unassigned) {
+    where.push('t.assignee_id IS NULL');
+  } else if (query.assigneeType && query.assigneeId) {
+    where.push('t.assignee_type = ? AND t.assignee_id = ?');
+    values.push(query.assigneeType, query.assigneeId);
+  }
+  if (query.search) {
+    const pattern = `%${query.search.replace(/[\\%_]/g, (char) => `\\${char}`)}%`;
+    where.push("(t.title LIKE ? ESCAPE '\\' OR t.description LIKE ? ESCAPE '\\')");
+    values.push(pattern, pattern);
+  }
+
+  const clause = where.join(' AND ');
+  const countRow = db.prepare(`SELECT COUNT(*) AS count FROM tasks t WHERE ${clause}`).get(...values) as
+    | { count: number }
+    | undefined;
+  const rows = db
+    .prepare(
+      `${TASK_SELECT}
+       WHERE ${clause}
+       ORDER BY CASE t.status WHEN 'doing' THEN 0 WHEN 'review' THEN 1 WHEN 'todo' THEN 2 ELSE 3 END,
+                t.created_at DESC
+       LIMIT ? OFFSET ?`,
+    )
+    .all(...values, query.limit, query.offset) as Row[];
+  return { tasks: rows.map(mapTask), total: Number(countRow?.count ?? 0) };
 }
 
 export function updateTaskFields(

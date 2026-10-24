@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { FormEvent } from 'react';
 import type { PrincipalType, RoomActions, RoomState, Task, TaskStatus } from '../lib/types';
 import { parsePaths, taskMeta, timeAgo } from '../lib/format';
@@ -10,6 +10,7 @@ interface TasksPanelProps {
   state: RoomState;
   actions: RoomActions;
   onOpenProfile: (type: PrincipalType, id: string) => void;
+  openFormNonce?: number;
 }
 
 const GROUP_ORDER: TaskStatus[] = ['doing', 'review', 'todo', 'done'];
@@ -30,7 +31,12 @@ function splitPrincipal(value: string): { type: PrincipalType | null; id: string
   return { type: type as PrincipalType, id };
 }
 
-export function TasksPanel({ state, actions, onOpenProfile }: TasksPanelProps) {
+export function TasksPanel({
+  state,
+  actions,
+  onOpenProfile,
+  openFormNonce,
+}: TasksPanelProps) {
   const me = state.me;
   const isAdmin = me.role === 'admin';
   const isViewer = me.role === 'viewer';
@@ -45,6 +51,12 @@ export function TasksPanel({ state, actions, onOpenProfile }: TasksPanelProps) {
   const [busy, setBusy] = useState(false);
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<TaskFilter>('all');
+
+  useEffect(() => {
+    if (openFormNonce === undefined || isViewer) return;
+    setError(null);
+    setShowForm(true);
+  }, [openFormNonce, isViewer]);
 
   const needle = query.trim().toLowerCase();
   const visibleTasks = state.tasks.filter((task) => {
@@ -307,7 +319,6 @@ export function TasksPanel({ state, actions, onOpenProfile }: TasksPanelProps) {
               {tasks.map((task) => {
                 const canManage =
                   isAdmin || (task.createdByType === me.type && task.createdById === me.id);
-                const canDelete = canManage || !isViewer;
                 const isAssignee = task.assigneeType === me.type && task.assigneeId === me.id;
                 const canChangeStatus = canManage || isAssignee;
                 const canClaim = !task.assigneeId && !isViewer && !canManage;
@@ -324,7 +335,7 @@ export function TasksPanel({ state, actions, onOpenProfile }: TasksPanelProps) {
                     <div className="task-card-head">
                       <span className={`task-dot ${meta.tone}`} />
                       <h4>{task.title}</h4>
-                      {canDelete ? (
+                      {canManage ? (
                         <button
                           type="button"
                           className="task-delete-btn"
