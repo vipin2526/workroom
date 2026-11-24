@@ -4,6 +4,7 @@ server/data/
 server/backups/
 .env
 *.log
+.qoder-tmp/
 
 # local agent credentials and cursors
 connector/.forge-credentials.json

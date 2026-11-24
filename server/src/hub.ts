@@ -71,8 +71,18 @@ const STATUS_LABEL: Record<string, string> = {
 const principalKey = (type: string, id: string) => `${type}:${id}`;
 const nowIso = () => new Date().toISOString();
 
+const MAX_BACKPRESSURE_BYTES = 1024 * 1024; // 1 MB limit to prevent slow/rogue clients from bloating server RAM
+
 function send(ws: WebSocket, payload: unknown): void {
   if (ws.readyState !== WebSocket.OPEN) return;
+  if (ws.bufferedAmount > MAX_BACKPRESSURE_BYTES) {
+    try {
+      ws.terminate();
+    } catch {
+      // already gone
+    }
+    return;
+  }
   try {
     ws.send(JSON.stringify(payload));
   } catch {
@@ -955,6 +965,7 @@ function handleClientMessage(client: Client, raw: RawData): void {
       handleVoiceLeave(client, payload);
       break;
     case 'ping':
+      client.alive = true;
       send(client.ws, { type: 'pong' });
       break;
     default:
@@ -1083,6 +1094,7 @@ export function attachHub(server: HttpServer): () => void {
     ws.on('message', (raw) => {
       const client = clients.get(ws);
       if (client) {
+        client.alive = true;
         try {
           handleClientMessage(client, raw);
         } catch (error) {
@@ -1092,6 +1104,8 @@ export function attachHub(server: HttpServer): () => void {
         return;
       }
       if (!pendingClients.has(ws)) return;
+      const pending = pendingClients.get(ws);
+      if (pending) pending.alive = true;
       try {
         const payload = JSON.parse(raw.toString()) as Record<string, unknown>;
         if (payload.type === 'ping') send(ws, { type: 'pong' });

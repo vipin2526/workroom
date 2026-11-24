@@ -1,0 +1,26 @@
+[Unit]
+Description=RoomForge 24/7 Agent Daemon
+After=network.target
+
+[Service]
+Type=simple
+User=node
+WorkingDirectory=/opt/roomforge/connector
+ExecStart=/usr/bin/node roomforge-wake.mjs
+Restart=always
+RestartSec=3
+Environment=NODE_ENV=production
+Environment=PERSISTENT=1
+Environment=ROOMFORGE_BASE=https://your-roomforge-server.com
+Environment=ROOMFORGE_TOKEN=rf_your_token_here
+Environment=TRIGGER_SECRET=your_trigger_secret_here
+Environment=AGENT_COMMAND="node mock-agent.mjs"
+
+# Safety and resource limits
+LimitNOFILE=65536
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=roomforge-agent
+
+[Install]
+WantedBy=multi-user.target

@@ -12,16 +12,16 @@
     "semantic_hash": ""
   },
   "server/scripts/agent-cli.mjs": {
-    "mtime": 1792664703.8330069,
-    "seen": 1792759504.890581,
-    "ast_hash": "d3133a0927e99dad258629d26f36b991",
-    "semantic_hash": "d3133a0927e99dad258629d26f36b991"
+    "mtime": 1795510085.062317,
+    "seen": 1795510497.025402,
+    "ast_hash": "8727916add2008473a4a72728302923c",
+    "semantic_hash": ""
   },
   "server/scripts/demo-agent.mjs": {
-    "mtime": 1792664601.5603518,
-    "seen": 1792759504.890581,
-    "ast_hash": "228fe7d6a71942b1636c7a39cc538a9d",
-    "semantic_hash": "228fe7d6a71942b1636c7a39cc538a9d"
+    "mtime": 1795510057.7303977,
+    "seen": 1795510497.025402,
+    "ast_hash": "41f449951227d6e77ac3a62a09ba3a07",
+    "semantic_hash": ""
   },
   "server/src/auth.ts": {
     "mtime": 1795269642.7293756,
@@ -42,15 +42,15 @@
     "semantic_hash": ""
   },
   "server/src/hub.ts": {
-    "mtime": 1795269642.738697,
-    "seen": 1795269726.637614,
-    "ast_hash": "8f7014927cc1115efdda4307cf5b599e",
+    "mtime": 1795509932.1700819,
+    "seen": 1795510497.025402,
+    "ast_hash": "fdf5a08efae61593ed36cca520966e3d",
     "semantic_hash": ""
   },
   "server/src/index.ts": {
-    "mtime": 1795269642.7413707,
-    "seen": 1795269726.637614,
-    "ast_hash": "6b476d24e742defe5afaeef6c4d4d9f3",
+    "mtime": 1795510185.637813,
+    "seen": 1795510497.025402,
+    "ast_hash": "d8679069bc6336b691d2c37e185ed840",
     "semantic_hash": ""
   },
   "server/src/routes.ts": {
@@ -84,9 +84,9 @@
     "semantic_hash": "2cf6d98c0a01f32a026e2e08b43395a8"
   },
   "web/src/App.tsx": {
-    "mtime": 1795501404.5468593,
-    "seen": 1795501590.244127,
-    "ast_hash": "4c6bc305dc432ed170d427c250f4e402",
+    "mtime": 1795502642.1628895,
+    "seen": 1795510497.025402,
+    "ast_hash": "00c391af00fbb01d49b632b276a75ed4",
     "semantic_hash": ""
   },
   "web/src/components/AgentGuide.tsx": {
@@ -132,9 +132,9 @@
     "semantic_hash": ""
   },
   "web/src/components/PublicRooms.tsx": {
-    "mtime": 1795269279.1582701,
-    "seen": 1795269610.608142,
-    "ast_hash": "66258b21f967f6b44845e1cd3550d949",
+    "mtime": 1795502622.0575774,
+    "seen": 1795510497.025402,
+    "ast_hash": "3b95e92b4e48356df527f712fc240561",
     "semantic_hash": ""
   },
   "web/src/components/ReposPanel.tsx": {
@@ -228,15 +228,15 @@
     "semantic_hash": ""
   },
   "connector/package.json": {
-    "mtime": 1792845540.7007535,
-    "seen": 1792904744.797938,
-    "ast_hash": "1d0ff496a75b87e900d894a159af0227",
+    "mtime": 1795509976.1711733,
+    "seen": 1795510497.025402,
+    "ast_hash": "030dac3046b54f0600fa2bdf52c85450",
     "semantic_hash": ""
   },
   "connector/roomforge-wake.mjs": {
-    "mtime": 1792764590.616579,
-    "seen": 1792826595.7293277,
-    "ast_hash": "0d7e043ebbe939816d623dbf3e046b82",
+    "mtime": 1795512931.5214112,
+    "seen": 1795512986.4709408,
+    "ast_hash": "f41df4c1ea7492b6583b30e57ef49a4b",
     "semantic_hash": ""
   },
   "server/scripts/backup.mjs": {
@@ -330,15 +330,15 @@
     "semantic_hash": ""
   },
   "web/src/components/SiteHeader.tsx": {
-    "mtime": 1795269642.7754097,
-    "seen": 1795269726.637614,
-    "ast_hash": "8c36b62a14f8eefedfe79fee6428eb4c",
+    "mtime": 1795502588.955183,
+    "seen": 1795510497.025402,
+    "ast_hash": "22c3d447bc8c529d9322b4da239ce01e",
     "semantic_hash": ""
   },
   "web/src/components/SitePage.tsx": {
-    "mtime": 1795269642.7766325,
-    "seen": 1795269726.637614,
-    "ast_hash": "0dbcf8f5a6f36bb4ced945a78d04b897",
+    "mtime": 1795502593.6612542,
+    "seen": 1795510497.025402,
+    "ast_hash": "7b00b0614d847509d831bd0311716225",
     "semantic_hash": ""
   },
   "web/src/components/VoiceStage.tsx": {
@@ -444,15 +444,15 @@
     "semantic_hash": ""
   },
   "README.md": {
-    "mtime": 1792898584.9408689,
-    "seen": 1792904744.7989302,
-    "ast_hash": "940d04df0d37979db3458e78442d7419",
+    "mtime": 1795513439.207703,
+    "seen": 1795513473.328266,
+    "ast_hash": "42c8916509ad2dd125474783e1acd04e",
     "semantic_hash": ""
   },
   "docs/agent-api.md": {
-    "mtime": 1792898634.4156175,
-    "seen": 1792904744.7989302,
-    "ast_hash": "334a178f4c675e38a0f3a297a1e4a788",
+    "mtime": 1795513428.6170778,
+    "seen": 1795513473.328266,
+    "ast_hash": "49d303e3f6cbf838ad749474ac8df059",
     "semantic_hash": ""
   },
   "web/index.html": {
@@ -654,9 +654,9 @@
     "semantic_hash": ""
   },
   "connector/roomforge-claude.mjs": {
-    "mtime": 1792828005.3670316,
-    "seen": 1792842552.3546078,
-    "ast_hash": "0dcd284c003933af58198598221fd2b5",
+    "mtime": 1795510024.7519605,
+    "seen": 1795510497.025402,
+    "ast_hash": "793aa2f5e611ebf72399aa863569a6a9",
     "semantic_hash": ""
   },
   "web/src/components/LinkifyText.tsx": {
@@ -741,6 +741,54 @@
     "mtime": 1795501563.555874,
     "seen": 1795501590.245578,
     "ast_hash": "90f315db4c7aec1feebd770a4aea0ed0",
+    "semantic_hash": ""
+  },
+  "connector/daemon/install-windows-service.ps1": {
+    "mtime": 1795510104.5058322,
+    "seen": 1795510497.025402,
+    "ast_hash": "3095715b42597b2a7a25eeabfc7d6b97",
+    "semantic_hash": ""
+  },
+  "connector/daemon/prevent-sleep.js": {
+    "mtime": 1795510112.723646,
+    "seen": 1795510497.025402,
+    "ast_hash": "5927731964740ce833efd148ac310e16",
+    "semantic_hash": ""
+  },
+  "connector/resilient-socket.mjs": {
+    "mtime": 1795509967.9931924,
+    "seen": 1795510497.025402,
+    "ast_hash": "3edbe21665c42fa1ae29d03b6256ce18",
+    "semantic_hash": ""
+  },
+  "server/src/gateway.ts": {
+    "mtime": 1795510198.742776,
+    "seen": 1795510497.025402,
+    "ast_hash": "b25ec43666a248ae1105a843a110326d",
+    "semantic_hash": ""
+  },
+  "docs/24-7-agent-architecture.md": {
+    "mtime": 1795513449.2855785,
+    "seen": 1795513473.328266,
+    "ast_hash": "44b0e97dc1b76ec6d9029def0d754073",
+    "semantic_hash": ""
+  },
+  "vibe_images/rooms-concept-5-command_1795501587343_3c6bca29.png": {
+    "mtime": 1795501587.3456318,
+    "seen": 1795510497.025402,
+    "ast_hash": "3257e390384688d7aa1bff6b7345fce3",
+    "semantic_hash": ""
+  },
+  "connector/README.md": {
+    "mtime": 1795513416.9036386,
+    "seen": 1795513473.328266,
+    "ast_hash": "d650ee3248db94f07a1ec8963ed508cb",
+    "semantic_hash": ""
+  },
+  ".qoder-tmp/five-agents.mjs": {
+    "mtime": 1795513072.721195,
+    "seen": 1795513473.328266,
+    "ast_hash": "c75d001e58efea00620b735e9b4feb8f",
     "semantic_hash": ""
   }
 }

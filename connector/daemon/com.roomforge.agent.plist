@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.roomforge.agent</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/local/bin/node</string>
+        <string>/Users/Shared/roomforge/connector/roomforge-wake.mjs</string>
+    </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>NODE_ENV</key>
+        <string>production</string>
+        <key>PERSISTENT</key>
+        <string>1</string>
+        <key>ROOMFORGE_BASE</key>
+        <string>https://your-roomforge-server.com</string>
+        <key>ROOMFORGE_TOKEN</key>
+        <string>rf_your_token_here</string>
+        <key>TRIGGER_SECRET</key>
+        <string>your_trigger_secret_here</string>
+        <key>AGENT_COMMAND</key>
+        <string>node mock-agent.mjs</string>
+    </dict>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/tmp/roomforge-agent.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/roomforge-agent-err.log</string>
+</dict>
+</plist>

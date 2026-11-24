@@ -18,9 +18,7 @@ if (!TOKEN) {
   process.exit(1);
 }
 
-const socket = new WebSocket(
-  `${SERVER_URL.replace(/^http/, 'ws')}/ws?token=${encodeURIComponent(TOKEN)}`,
-);
+const wsUrl = `${SERVER_URL.replace(/^http/, 'ws')}/ws?token=${encodeURIComponent(TOKEN)}`;
 
 const rl = createInterface({ input: process.stdin, output: process.stdout });
 const interactive = Boolean(process.stdin.isTTY);
@@ -29,6 +27,22 @@ let me = null;
 let room = null;
 let presence = [];
 let quitting = false;
+let socket = null;
+let retries = 0;
+let watchdogTimer = null;
+const WATCHDOG_TIMEOUT_MS = 50_000;
+
+function resetWatchdog() {
+  clearTimeout(watchdogTimer);
+  watchdogTimer = setTimeout(() => {
+    if (!quitting && socket) {
+      console.log('\n[Watchdog] Server quiet for 50s. Reconnecting...');
+      try {
+        socket.terminate();
+      } catch {}
+    }
+  }, WATCHDOG_TIMEOUT_MS);
+}
 
 function printPresence() {
   if (presence.length === 0) {
@@ -67,7 +81,12 @@ function handleLine(line) {
     kind = prefixed[1];
     content = prefixed[2];
   }
-  socket.send(JSON.stringify({ type: 'message.send', content, kind }));
+  if (socket && socket.readyState === WebSocket.OPEN) {
+    socket.send(JSON.stringify({ type: 'message.send', content, kind }));
+  } else {
+    queued.push(text);
+    console.log('[offline: queued]');
+  }
   prompt();
 }
 
@@ -79,8 +98,10 @@ rl.on('line', (line) => {
   }
   if (text === '/quit' || text === '/exit') {
     quitting = true;
-    socket.close();
+    clearTimeout(watchdogTimer);
+    socket?.close(1000, 'quit');
     rl.close();
+    process.exit(0);
     return;
   }
   if (!room) {
@@ -90,75 +111,104 @@ rl.on('line', (line) => {
   handleLine(text);
 });
 
-socket.on('open', () => {
-  console.log('Connecting to RoomForge…');
-});
+function connect() {
+  if (quitting) return;
+  clearTimeout(watchdogTimer);
 
-socket.on('message', (raw) => {
-  let event;
-  try {
-    event = JSON.parse(String(raw));
-  } catch {
-    return;
-  }
+  socket = new WebSocket(wsUrl);
 
-  switch (event.type) {
-    case 'ready':
-      me = event.principal;
-      console.log(`Signed in as ${me.name}.`);
-      break;
-    case 'room.state':
-      room = event.state.room;
-      presence = event.state.presence ?? [];
-      console.log('');
-      console.log(`Joined “${room.name}”${room.topic ? ` — ${room.topic}` : ''}`);
-      console.log('Type to chat. Commands: /instruction <text>, /suggestion <text>, /who, /quit');
-      console.log('');
-      prompt();
-      for (const line of queued.splice(0)) handleLine(line);
-      break;
-    case 'message.new': {
-      const message = event.message;
-      const mine = me && message.senderId === me.id;
-      const label = message.kind === 'chat' ? '' : `[${message.kind}] `;
-      console.log(`${mine ? 'you' : message.senderName}: ${label}${message.content}`);
-      if (room && !mine) prompt();
-      break;
+  socket.on('open', () => {
+    retries = 0;
+    resetWatchdog();
+  });
+
+  socket.on('ping', () => resetWatchdog());
+  socket.on('pong', () => resetWatchdog());
+
+  socket.on('message', (raw) => {
+    resetWatchdog();
+    let event;
+    try {
+      event = JSON.parse(String(raw));
+    } catch {
+      return;
     }
-    case 'presence.update':
-      presence = event.presence ?? [];
-      break;
-    case 'task.updated':
-      console.log(
-        `[task] “${event.task.title}” → ${event.task.status}${event.task.assigneeName ? ` (${event.task.assigneeName})` : ''}`,
-      );
-      if (room) prompt();
-      break;
-    case 'error':
-      console.error(`[server] ${event.message}`);
-      if (room) prompt();
-      break;
-    case 'removed':
-      console.error('You were removed from the room. Exiting.');
-      quitting = true;
-      socket.close();
+
+    if (event.type === 'pong') return;
+
+    switch (event.type) {
+      case 'ready':
+        me = event.principal;
+        console.log(`Signed in as ${me.name}.`);
+        break;
+      case 'room.state':
+        room = event.state.room;
+        presence = event.state.presence ?? [];
+        console.log('');
+        console.log(`Joined “${room.name}”${room.topic ? ` — ${room.topic}` : ''}`);
+        console.log('Type to chat. Commands: /instruction <text>, /suggestion <text>, /who, /quit');
+        console.log('');
+        prompt();
+        for (const line of queued.splice(0)) handleLine(line);
+        break;
+      case 'message.new': {
+        const message = event.message;
+        const mine = me && message.senderId === me.id;
+        const label = message.kind === 'chat' ? '' : `[${message.kind}] `;
+        console.log(`${mine ? 'you' : message.senderName}: ${label}${message.content}`);
+        if (room && !mine) prompt();
+        break;
+      }
+      case 'presence.update':
+        presence = event.presence ?? [];
+        break;
+      case 'task.updated':
+        console.log(
+          `[task] “${event.task.title}” → ${event.task.status}${event.task.assigneeName ? ` (${event.task.assigneeName})` : ''}`,
+        );
+        if (room) prompt();
+        break;
+      case 'error':
+        console.error(`[server] ${event.message}`);
+        if (room) prompt();
+        break;
+      case 'removed':
+        console.error('You were removed from the room. Exiting.');
+        quitting = true;
+        clearTimeout(watchdogTimer);
+        socket.close();
+        rl.close();
+        process.exit(0);
+        break;
+      default:
+        break;
+    }
+  });
+
+  socket.on('close', (code) => {
+    clearTimeout(watchdogTimer);
+    socket = null;
+
+    if (quitting) return;
+
+    if (code === 4001 || code === 4003) {
+      console.error('\nConnection rejected: token invalid or revoked.');
       rl.close();
-      break;
-    default:
-      break;
-  }
-});
+      process.exit(1);
+    }
 
-socket.on('close', (code) => {
-  if (code === 4001) {
-    console.error('Connection rejected: the agent token is invalid or has been revoked.');
-  } else if (!quitting) {
-    console.error(`Disconnected (${code}).`);
-  }
-  rl.close();
-  process.exit(code === 4001 ? 1 : 0);
-});
+    retries += 1;
+    const baseDelay = Math.min(1000 * Math.pow(1.5, Math.min(retries, 6)), 15000);
+    const jitter = Math.floor(Math.random() * 1000);
+    const delay = Math.round(baseDelay + jitter);
 
-socket.on('error', (error) => {
-  if (!quitting) console.error(`Connection error: ${error.message}`);
-});
+    console.log(`\n[Disconnected (${code}). Reconnecting in ${delay}ms...]`);
+    setTimeout(connect, delay);
+  });
+
+  socket.on('error', (error) => {
+    if (!quitting) console.error(`\nConnection error: ${error.message}`);
+  });
+}
+
+connect();

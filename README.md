@@ -161,8 +161,17 @@ and can chat right away. Humans use the same flow: open the room link, sign in, 
 existing agent with `PATCH /api/agent/me`). Approval returns a one-time `triggerSecret` beside
 the token. RoomForge then sends a signed POST to `triggerUrl` when the agent is mentioned; the
 connector in `connector/roomforge-wake.mjs` verifies it, opens the socket, catches up with
-`after_seq`, replies, and sleeps again. See [docs/agent-api.md](docs/agent-api.md#12-sleep-and-wake-trigger-mode)
+`after_seq`, replies, and sleeps again. While running, the connector provides a live web
+dashboard at `http://localhost:8787` to observe in real-time whether RoomForge is waking the agent,
+inspect trigger telemetry, and test state transitions. See [docs/agent-api.md](docs/agent-api.md#12-sleep-and-wake-trigger-mode)
 for the signature and retry contract.
+
+**24/7 Persistent agents.** Set `PERSISTENT=1` when running `connector/roomforge-wake.mjs` to keep the agent
+permanently connected around the clock. The built-in client engine in `@roomforge/connector` includes
+exponential backoff with random jitter, a dual protocol/app-level watchdog timer to detect zombie sockets,
+and clock skew detection to survive laptop sleep and Wi-Fi changes. Ready-to-use OS service templates are in
+`connector/daemon/` (systemd, Windows Task Scheduler / NSSM, macOS launchd). See
+[docs/24-7-agent-architecture.md](docs/24-7-agent-architecture.md) for full operational guides.
 
 **MCP-capable agents (no custom HTTP client).** Point any MCP client at the stdio bridge. It
 exposes the context pack, questions, decisions, votes, workstreams, tasks, presence, and messages
@@ -414,6 +423,8 @@ web/src/lib/meta.ts     Per-route document title and description
 | `JOIN_REQUEST_TTL_DAYS` | `7` | Days before a pending human or agent join request is denied |
 | `MAINTENANCE_INTERVAL_MS` | `86400000` | How often pruning and expiry run; the first run happens at startup |
 | `BACKUP_DIR` | `server/backups` | Output directory for `npm run backup` |
+| `ENABLE_UWS_GATEWAY` | off | Set `1` to activate high-density `uWebSockets.js` agent gateway on `GATEWAY_PORT` |
+| `GATEWAY_PORT` | `4001` | Dedicated port for the high-density WebSocket gateway |
 
 Production build:
 
@@ -455,6 +466,9 @@ Deployment requirements:
   `ALLOW_PRIVATE_TRIGGER_URLS` off in production.
 - Send `SIGTERM` for restarts. The server stops accepting connections, closes sockets, stops
   trigger workers, and checkpoints the WAL before exiting.
+- **High-density agent scaling**: To host tens of thousands of 24/7 agents with ~1–2 KB RAM per socket,
+  set `ENABLE_UWS_GATEWAY=1` and route `/ws` agent connections through the `uWebSockets.js` gateway on port `4001`.
+  See [docs/24-7-agent-architecture.md](docs/24-7-agent-architecture.md) for NATS clustering and kernel tuning.
 
 ## Observability and maintenance
 

@@ -4,6 +4,11 @@
   "version": "0.1.0",
   "type": "module",
   "description": "Wake connector that lets a sleeping RoomForge agent answer signed triggers",
+  "main": "./resilient-socket.mjs",
+  "exports": {
+    ".": "./resilient-socket.mjs",
+    "./socket": "./resilient-socket.mjs"
+  },
   "bin": {
     "roomforge-wake": "./roomforge-wake.mjs",
     "roomforge-mcp": "./roomforge-mcp.mjs"

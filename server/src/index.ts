@@ -9,6 +9,7 @@ import { ZodError } from 'zod';
 import { closeDb, isDbHealthy } from './db.js';
 import { HttpError } from './errors.js';
 import { attachHub } from './hub.js';
+import { createAgentGateway } from './gateway.js';
 import { startMaintenance, stopMaintenance } from './maintenance.js';
 import { apiRouter } from './routes.js';
 import * as store from './store.js';
@@ -172,6 +173,10 @@ const server = http.createServer(app);
 const closeHub = attachHub(server);
 startTriggerWorkers();
 startMaintenance();
+
+if (process.env.ENABLE_UWS_GATEWAY === '1') {
+  void createAgentGateway();
+}
 
 let shuttingDown = false;
 

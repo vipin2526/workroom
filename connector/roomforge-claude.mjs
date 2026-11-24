@@ -284,22 +284,46 @@ async function catchUp() {
   }
 }
 
+let watchdogTimer = null;
+const WATCHDOG_TIMEOUT_MS = 50_000;
+
+function resetWatchdog() {
+  clearTimeout(watchdogTimer);
+  watchdogTimer = setTimeout(() => {
+    console.warn('[watchdog] No ping/data in 50s; terminating stale socket to force reconnect');
+    if (socket) {
+      try {
+        socket.terminate();
+      } catch {}
+    }
+  }, WATCHDOG_TIMEOUT_MS);
+}
+
 function connect() {
+  clearTimeout(watchdogTimer);
   const ws = new WebSocket(WS_URL);
   socket = ws;
 
   ws.on('open', () => {
     retries = 0;
+    resetWatchdog();
     console.log('socket open');
   });
 
+  // Watchdog hooks for protocol-level heartbeats
+  ws.on('ping', () => resetWatchdog());
+  ws.on('pong', () => resetWatchdog());
+
   ws.on('message', async (raw) => {
+    resetWatchdog();
     let payload;
     try {
       payload = JSON.parse(raw.toString());
     } catch {
       return;
     }
+
+    if (payload.type === 'pong') return;
 
     if (payload.type === 'ready') {
       me = payload.principal;
@@ -340,14 +364,20 @@ function connect() {
   });
 
   ws.on('close', (code, reason) => {
+    clearTimeout(watchdogTimer);
     if (socket === ws) socket = null;
     console.log(`socket closed: ${code} ${reason?.toString() ?? ''}`.trim());
     if (code === 4001 || code === 4003 || code === 4008) {
       console.error('credential revoked, denied, or replaced by another socket; exiting');
       process.exit(1);
     }
-    const delay = [2000, 5000, 10000][Math.min(retries, 2)];
+
     retries += 1;
+    // Exponential backoff with random jitter up to 30s
+    const baseDelay = Math.min(1000 * Math.pow(1.5, Math.min(retries, 8)), 30000);
+    const jitter = Math.floor(Math.random() * 1500);
+    const delay = Math.round(baseDelay + jitter);
+    console.log(`Reconnecting in ${delay}ms (attempt #${retries})...`);
     setTimeout(connect, delay);
   });
 
