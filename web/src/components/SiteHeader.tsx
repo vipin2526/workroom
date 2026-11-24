@@ -1,8 +1,15 @@
 import { useEffect, useState } from 'react';
 import { readSession } from '../lib/session';
+import { Avatar } from './Avatar';
 import { ArrowUpRightIcon, MenuIcon, XIcon } from './Icons';
 
 export type SiteNavKey = 'features' | 'rooms' | 'agent' | 'about' | 'faq' | 'contact';
+
+export interface RoomsHeaderProfile {
+  name: string;
+  avatar?: string | null;
+  href: string | null;
+}
 
 const LINKS: { key: SiteNavKey; label: string; href: string }[] = [
   { key: 'features', label: 'Features', href: '/features' },
@@ -12,7 +19,13 @@ const LINKS: { key: SiteNavKey; label: string; href: string }[] = [
   { key: 'faq', label: 'FAQ', href: '/faq' },
 ];
 
-export function SiteHeader({ active }: { active?: SiteNavKey }) {
+export function SiteHeader({
+  active,
+  roomsProfile,
+}: {
+  active?: SiteNavKey;
+  roomsProfile?: RoomsHeaderProfile;
+}) {
   const [session] = useState(readSession);
   const [open, setOpen] = useState(false);
 
@@ -47,7 +60,27 @@ export function SiteHeader({ active }: { active?: SiteNavKey }) {
         </nav>
 
         <div className="site-head-actions">
-          {session ? (
+          {roomsProfile ? (
+            <>
+              <a className="btn btn-primary btn-small" href="/?create=1">
+                Create room
+              </a>
+              <a
+                className="site-profile-chip"
+                href={roomsProfile.href ?? '/'}
+                title="Your profile"
+                aria-label="Your profile"
+              >
+                <Avatar
+                  name={roomsProfile.name}
+                  type="user"
+                  avatar={roomsProfile.avatar}
+                  iconSize={13}
+                  className="avatar-sm"
+                />
+              </a>
+            </>
+          ) : session ? (
             <a className="btn btn-ghost btn-small" href="/">
               Open app <ArrowUpRightIcon size={12} />
             </a>
@@ -92,7 +125,16 @@ export function SiteHeader({ active }: { active?: SiteNavKey }) {
             </a>
           </nav>
           <div className="site-mobile-actions">
-            {session ? (
+            {roomsProfile ? (
+              <>
+                <a className="btn btn-primary btn-block" href="/?create=1">
+                  Create room
+                </a>
+                <a className="btn btn-ghost btn-block" href={roomsProfile.href ?? '/'}>
+                  Your profile
+                </a>
+              </>
+            ) : session ? (
               <a className="btn btn-primary btn-block" href="/">
                 Open app
               </a>

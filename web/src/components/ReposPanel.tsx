@@ -35,7 +35,13 @@ export function ReposPanel({ state, actions }: ReposPanelProps) {
   }
 
   async function removeRepo(repoId: string, repoName: string) {
-    if (!window.confirm(`Unlink ${repoName}? Tasks will keep their history but lose the repo link.`)) return;
+    const ok = await actions.confirm({
+      title: `Unlink ${repoName}?`,
+      message: 'Tasks will keep their history but will lose the repository link.',
+      confirmText: 'Unlink Repository',
+      tone: 'warning',
+    });
+    if (!ok) return;
     setError(null);
     try {
       await actions.deleteRepo(repoId);

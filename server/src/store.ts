@@ -391,6 +391,32 @@ export function listPublicRooms(): (RoomSummary & { code: string; createdAt: str
   }));
 }
 
+export function listDirectoryRooms(): (RoomSummary & { code: string; createdAt: string })[] {
+  const rows = db
+    .prepare(
+      `SELECT r.id, r.name, r.topic, r.mode, r.code, r.created_at, r.visibility, r.parent_room_id,
+              (SELECT COUNT(*) FROM room_members m WHERE m.room_id = r.id) AS member_count
+       FROM rooms r
+       ORDER BY r.created_at DESC`,
+    )
+    .all() as Row[];
+
+  return rows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    topic: row.topic,
+    mode: row.mode as RoomMode,
+    role: 'viewer' as Role,
+    code: row.code,
+    memberCount: Number(row.member_count),
+    unreadCount: 0,
+    pendingRequests: 0,
+    visibility: (row.visibility as RoomVisibility) ?? 'public',
+    createdAt: row.created_at,
+    parentRoomId: row.parent_room_id ?? null,
+  }));
+}
+
 /* ------------------------------ members --------------------------------- */
 
 export function getMembership(roomId: string, principal: Principal): { role: Role; joinedAt: string } | undefined {
@@ -402,7 +428,8 @@ export function getMembership(roomId: string, principal: Principal): { role: Rol
 
 export function addMember(roomId: string, principal: Principal, role: Role): void {
   db.prepare(
-    'INSERT OR IGNORE INTO room_members (room_id, principal_type, principal_id, role, joined_at) VALUES (?, ?, ?, ?, ?)',
+    `INSERT INTO room_members (room_id, principal_type, principal_id, role, joined_at) VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(room_id, principal_type, principal_id) DO UPDATE SET role = excluded.role`,
   ).run(roomId, principal.type, principal.id, role, nowIso());
 }
 

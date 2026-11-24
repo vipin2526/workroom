@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { FormEvent } from 'react';
 import { api } from '../lib/api';
+import { profilePath } from '../lib/profile';
 import { usePageMeta } from '../lib/meta';
+import { readSession } from '../lib/session';
 import type { PublicRoom, RoomMode } from '../lib/types';
 import { Avatar } from './Avatar';
 import { LinkifyText } from './LinkifyText';
@@ -11,6 +12,7 @@ import {
   BranchIcon,
   CheckIcon,
   CopyIcon,
+  GlobeIcon,
   HashIcon,
   SearchIcon,
   ShieldIcon,
@@ -19,8 +21,8 @@ import {
 
 export function PublicRoomsPage() {
   usePageMeta(
-    'Public rooms — RoomForge',
-    'Browse public RoomForge rooms, preview members, or jump straight to a room with its five-character code.',
+    'Rooms Directory — RoomForge',
+    'Browse public and private rooms, preview members, or jump straight to a room with its code.',
   );
 
   const [rooms, setRooms] = useState<PublicRoom[]>([]);
@@ -29,8 +31,12 @@ export function PublicRoomsPage() {
 
   const [search, setSearch] = useState('');
   const [modeFilter, setModeFilter] = useState<'all' | RoomMode>('all');
-  const [jumpCode, setJumpCode] = useState('');
-  const [jumpError, setJumpError] = useState<string | null>(null);
+  const [visibilityFilter, setVisibilityFilter] = useState<'all' | 'public' | 'private'>('all');
+
+  const [session] = useState(readSession);
+  const [profileHref, setProfileHref] = useState<string | null>(() =>
+    session?.user.handle ? profilePath('user', session.user.handle) : null,
+  );
 
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -44,7 +50,7 @@ export function PublicRoomsPage() {
         setRooms(data.rooms);
       })
       .catch((err) => {
-        setError(err instanceof Error ? err.message : 'Could not load public rooms');
+        setError(err instanceof Error ? err.message : 'Could not load rooms');
       })
       .finally(() => {
         setLoading(false);
@@ -55,9 +61,35 @@ export function PublicRoomsPage() {
     loadRooms();
   }, []);
 
+  useEffect(() => {
+    if (!session) return;
+    let cancelled = false;
+    api
+      .myProfile()
+      .then(({ profile }) => {
+        if (!cancelled && profile.type === 'user') {
+          setProfileHref(profilePath('user', profile.handle));
+        }
+      })
+      .catch(() => {
+        // The cached session handle is a fine fallback.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [session?.user.id]);
+
+  const publicCount = useMemo(() => rooms.filter((r) => (r.visibility ?? 'public') === 'public').length, [rooms]);
+  const privateCount = useMemo(() => rooms.filter((r) => r.visibility === 'unlisted').length, [rooms]);
+  const codeCount = useMemo(() => rooms.filter((r) => r.mode === 'code').length, [rooms]);
+  const chatCount = useMemo(() => rooms.filter((r) => r.mode === 'chat').length, [rooms]);
+
   const filteredRooms = useMemo(() => {
     const q = search.trim().toLowerCase();
     return rooms.filter((r) => {
+      const isPriv = r.visibility === 'unlisted';
+      if (visibilityFilter === 'public' && isPriv) return false;
+      if (visibilityFilter === 'private' && !isPriv) return false;
       const matchesMode = modeFilter === 'all' || r.mode === modeFilter;
       if (!matchesMode) return false;
       if (!q) return true;
@@ -67,18 +99,7 @@ export function PublicRoomsPage() {
         (r.topic && r.topic.toLowerCase().includes(q))
       );
     });
-  }, [rooms, search, modeFilter]);
-
-  function handleJump(e: FormEvent) {
-    e.preventDefault();
-    setJumpError(null);
-    const code = jumpCode.trim();
-    if (!code) {
-      setJumpError('Please enter a room code');
-      return;
-    }
-    window.location.assign(`/room/${code}`);
-  }
+  }, [rooms, search, modeFilter, visibilityFilter]);
 
   function copyCode(code: string, e: React.MouseEvent) {
     e.stopPropagation();
@@ -91,43 +112,24 @@ export function PublicRoomsPage() {
   }
 
   return (
-    <SitePage active="rooms">
+    <SitePage
+      active="rooms"
+      roomsProfile={
+        session
+          ? {
+              name: session.user.name,
+              avatar: session.user.avatar,
+              href: profileHref,
+            }
+          : undefined
+      }
+    >
       <main className="site-main">
         <div className="directory-main">
-          {/* Hero Section */}
-          <div className="directory-hero">
-            <span className="landing-eyebrow">
-              <ShieldIcon size={13} /> RoomForge Directory
-            </span>
-            <h1>Public Rooms</h1>
-            <p className="directory-subtitle">
-              Browse all available rooms or enter any room&apos;s unique five-character code to jump
-              straight into <code>/room/:code</code>.
-            </p>
-
-          {/* Quick jump input */}
-          <form className="quick-jump-form" onSubmit={handleJump}>
-            <div className="quick-jump-box">
-              <span className="quick-jump-label">/room/</span>
-              <input
-                className="quick-jump-input"
-                placeholder="A7K2Q"
-                value={jumpCode}
-                onChange={(e) => {
-                  setJumpCode(e.target.value);
-                  if (jumpError) setJumpError(null);
-                }}
-                maxLength={16}
-                autoComplete="off"
-                spellCheck="false"
-              />
-              <button type="submit" className="btn btn-primary btn-small">
-                Go to room <ArrowUpRightIcon size={13} />
-              </button>
-            </div>
-            {jumpError ? <p className="form-error jump-error">{jumpError}</p> : null}
-          </form>
-        </div>
+          <div className="directory-hero directory-hero-row">
+            <h1>Rooms Directory</h1>
+            <p className="directory-hero-note">Browse all public and private rooms.</p>
+          </div>
 
         {/* Filters & Search Toolbar */}
         <div className="directory-toolbar">
@@ -155,24 +157,49 @@ export function PublicRoomsPage() {
           <div className="directory-filter-tabs">
             <button
               type="button"
-              className={`filter-tab ${modeFilter === 'all' ? 'active' : ''}`}
-              onClick={() => setModeFilter('all')}
+              className={`filter-tab ${modeFilter === 'all' && visibilityFilter === 'all' ? 'active' : ''}`}
+              onClick={() => {
+                setModeFilter('all');
+                setVisibilityFilter('all');
+              }}
             >
               All ({rooms.length})
             </button>
             <button
               type="button"
-              className={`filter-tab ${modeFilter === 'code' ? 'active' : ''}`}
-              onClick={() => setModeFilter('code')}
+              className={`filter-tab ${visibilityFilter === 'public' ? 'active' : ''}`}
+              onClick={() => {
+                setVisibilityFilter(visibilityFilter === 'public' ? 'all' : 'public');
+              }}
             >
-              <BranchIcon size={13} /> Code rooms ({rooms.filter((r) => r.mode === 'code').length})
+              <GlobeIcon size={13} /> Public ({publicCount})
+            </button>
+            <button
+              type="button"
+              className={`filter-tab ${visibilityFilter === 'private' ? 'active' : ''}`}
+              onClick={() => {
+                setVisibilityFilter(visibilityFilter === 'private' ? 'all' : 'private');
+              }}
+            >
+              <ShieldIcon size={13} /> Private ({privateCount})
+            </button>
+            <button
+              type="button"
+              className={`filter-tab ${modeFilter === 'code' ? 'active' : ''}`}
+              onClick={() => {
+                setModeFilter(modeFilter === 'code' ? 'all' : 'code');
+              }}
+            >
+              <BranchIcon size={13} /> Code ({codeCount})
             </button>
             <button
               type="button"
               className={`filter-tab ${modeFilter === 'chat' ? 'active' : ''}`}
-              onClick={() => setModeFilter('chat')}
+              onClick={() => {
+                setModeFilter(modeFilter === 'chat' ? 'all' : 'chat');
+              }}
             >
-              <HashIcon size={13} /> Chat rooms ({rooms.filter((r) => r.mode === 'chat').length})
+              <HashIcon size={13} /> Chat ({chatCount})
             </button>
           </div>
         </div>
@@ -232,10 +259,21 @@ export function PublicRoomsPage() {
                   onClick={() => window.location.assign(roomUrl)}
                 >
                   <div className="directory-card-head">
-                    <span className={`mode-badge mode-${room.mode}`}>
-                      {isCodeMode ? <BranchIcon size={12} /> : <HashIcon size={12} />}
-                      {isCodeMode ? 'Code room' : 'Chat room'}
-                    </span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span className={`mode-badge mode-${room.mode}`}>
+                        {isCodeMode ? <BranchIcon size={12} /> : <HashIcon size={12} />}
+                        {isCodeMode ? 'Code room' : 'Chat room'}
+                      </span>
+                      {room.visibility === 'unlisted' ? (
+                        <span className="tag tag-gray" title="Private room">
+                          <ShieldIcon size={11} /> Private
+                        </span>
+                      ) : (
+                        <span className="tag tag-teal" title="Public room">
+                          <GlobeIcon size={11} /> Public
+                        </span>
+                      )}
+                    </div>
                     <button
                       type="button"
                       className="room-code-tag"

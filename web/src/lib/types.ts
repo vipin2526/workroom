@@ -480,6 +480,7 @@ export interface PublicRoom {
   name: string;
   topic: string;
   mode: RoomMode;
+  visibility?: RoomVisibility;
   createdAt?: string;
   memberCount: number;
   id?: string;
@@ -546,7 +547,16 @@ export interface TriggerTestResult {
   error?: string;
 }
 
+export interface ConfirmOptions {
+  title: string;
+  message: string;
+  confirmText?: string;
+  cancelText?: string;
+  tone?: 'danger' | 'warning' | 'info';
+}
+
 export interface RoomActions {
+  confirm(options: ConfirmOptions): Promise<boolean>;
   sendMessage(content: string, kind: MessageKind): void;
   setPresence(input: {
     status?: PresenceStatus;

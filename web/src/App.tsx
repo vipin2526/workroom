@@ -39,6 +39,7 @@ import type {
   WorkstreamSummary,
   WorkspacePanelRequest,
   WorkspaceTab,
+  ConfirmOptions,
 } from './lib/types';
 import { AuthScreen } from './components/AuthScreen';
 import { Sidebar } from './components/Sidebar';
@@ -46,6 +47,7 @@ import { RoomView } from './components/RoomView';
 import { Modal } from './components/Modal';
 import { MemberProfileDialog } from './components/MemberProfileDialog';
 import { ProfileDialog } from './components/ProfileDialog';
+import { ConfirmDialog } from './components/ConfirmDialog';
 import { BranchIcon, GlobeIcon, HashIcon, MenuIcon, PlusIcon } from './components/Icons';
 import { showMentionNotification } from './lib/notifications';
 
@@ -95,6 +97,11 @@ export default function App({ initialCode }: AppProps = {}) {
   const [joinCode, setJoinCode] = useState('');
   const [joinError, setJoinError] = useState<string | null>(null);
 
+  const [confirmState, setConfirmState] = useState<{
+    options: ConfirmOptions;
+    resolve: (value: boolean) => void;
+  } | null>(null);
+
   const socketRef = useRef<WebSocket | null>(null);
   const activeIdRef = useRef<string | null>(null);
   const roomsRef = useRef<RoomSummary[]>([]);
@@ -108,6 +115,19 @@ export default function App({ initialCode }: AppProps = {}) {
     activeIdRef.current = activeId;
     lastMarkedRef.current = 0;
   }, [activeId]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('create') !== '1') return;
+    setNewRoomOpen(true);
+    params.delete('create');
+    const query = params.toString();
+    window.history.replaceState(
+      null,
+      '',
+      `${window.location.pathname}${query ? `?${query}` : ''}${window.location.hash}`,
+    );
+  }, []);
 
   useEffect(() => {
     roomsRef.current = rooms;
@@ -938,6 +958,12 @@ export default function App({ initialCode }: AppProps = {}) {
       );
     },
 
+    confirm(options: ConfirmOptions): Promise<boolean> {
+      return new Promise((resolve) => {
+        setConfirmState({ options, resolve });
+      });
+    },
+
     async deleteRoom() {
       const roomId = activeIdRef.current;
       if (!roomId) return;
@@ -954,11 +980,14 @@ export default function App({ initialCode }: AppProps = {}) {
       const current = roomStateRef.current;
       if (!roomId) return false;
       const name = current?.room.name ?? 'this room';
-      if (
-        !window.confirm(
-          `Leave “${name}”?\n\nYou will return to the room's public page and can request access again later.`,
-        )
-      ) {
+      const confirmed = await actions.confirm({
+        title: `Leave “${name}”?`,
+        message: 'You will return to the rooms page. Your access and admin role are preserved so you can return anytime.',
+        confirmText: 'Leave Room',
+        cancelText: 'Stay in Room',
+        tone: 'warning',
+      });
+      if (!confirmed) {
         return false;
       }
       try {
@@ -967,12 +996,10 @@ export default function App({ initialCode }: AppProps = {}) {
         showNotice(error instanceof Error ? error.message : 'Could not leave the room');
         return false;
       }
-      const code = current?.room.code;
-      setRooms((prev) => prev.filter((room) => room.id !== roomId));
       setRoomState(null);
       setActiveId(null);
       setMemberProfile(null);
-      window.location.assign(code ? `/room/${code}` : '/room');
+      window.location.assign('/rooms');
       return true;
     },
 
@@ -1474,6 +1501,20 @@ export default function App({ initialCode }: AppProps = {}) {
           onClose={() => setAgentProfileId(null)}
           onSaved={handleProfileSaved}
           onNotice={showNotice}
+        />
+      ) : null}
+
+      {confirmState ? (
+        <ConfirmDialog
+          options={confirmState.options}
+          onConfirm={() => {
+            confirmState.resolve(true);
+            setConfirmState(null);
+          }}
+          onCancel={() => {
+            confirmState.resolve(false);
+            setConfirmState(null);
+          }}
         />
       ) : null}
 

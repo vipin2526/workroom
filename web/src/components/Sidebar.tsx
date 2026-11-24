@@ -159,7 +159,7 @@ export function Sidebar({
                   type="button"
                   className="btn btn-quiet btn-small sidebar-leave-btn"
                   onClick={onLeaveRoom}
-                  title="Leave this room and return to its public page"
+                  title="Leave this room and return to the rooms page (access and admin role are kept)"
                 >
                   <ArrowLeftIcon size={13} /> Leave
                 </button>

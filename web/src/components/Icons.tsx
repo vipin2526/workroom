@@ -276,3 +276,55 @@ export const BellOffIcon = (props: IconProps) => (
   </Icon>
 );
 
+export const DoubleCheckIcon = (props: IconProps) => (
+  <Icon {...props}>
+    <path d="m2 12 4.5 4.5L16 7" />
+    <path d="m8.5 12 3 3L21 6.5" />
+  </Icon>
+);
+
+export const SmileIcon = (props: IconProps) => (
+  <Icon {...props}>
+    <circle cx="12" cy="12" r="9" />
+    <path d="M8 14.5c1.2 1.5 2.8 2 4 2s2.8-.5 4-2" />
+    <line x1="9" y1="9" x2="9.01" y2="9" strokeWidth={2.4} />
+    <line x1="15" y1="9" x2="15.01" y2="9" strokeWidth={2.4} />
+  </Icon>
+);
+
+export const PaperclipIcon = (props: IconProps) => (
+  <Icon {...props}>
+    <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+  </Icon>
+);
+
+export const ReplyIcon = (props: IconProps) => (
+  <Icon {...props}>
+    <polyline points="9 17 4 12 9 7" />
+    <path d="M20 18v-2a4 4 0 0 0-4-4H4" />
+  </Icon>
+);
+
+export const ChevronDownIcon = (props: IconProps) => (
+  <Icon {...props}>
+    <polyline points="6 9 12 15 18 9" />
+  </Icon>
+);
+
+export const AlertTriangleIcon = (props: IconProps) => (
+  <Icon {...props}>
+    <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" />
+    <line x1="12" y1="9" x2="12" y2="13" />
+    <line x1="12" y1="17" x2="12.01" y2="17" />
+  </Icon>
+);
+
+export const InfoIcon = (props: IconProps) => (
+  <Icon {...props}>
+    <circle cx="12" cy="12" r="10" />
+    <line x1="12" y1="16" x2="12" y2="12" />
+    <line x1="12" y1="8" x2="12.01" y2="8" />
+  </Icon>
+);
+
+

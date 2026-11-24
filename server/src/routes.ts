@@ -135,6 +135,7 @@ function publicRoomSummary(room: Room) {
     name: room.name,
     topic: room.topic,
     mode: room.mode,
+    visibility: room.visibility,
     createdAt: room.createdAt,
     memberCount: store.listMembers(room.id).length,
   };
@@ -377,10 +378,10 @@ router.get('/agent/connect/:token', (req, res) => {
   );
 });
 
-/* Public rooms directory: returns all public rooms */
+/* Public and private rooms directory: returns all rooms */
 router.get(['/rooms/public', '/room', '/rooms/all'], (req, res) => {
   previewHeaders(res);
-  const rooms = store.listPublicRooms().map((room) => ({
+  const rooms = store.listDirectoryRooms().map((room) => ({
     ...room,
     memberPreviews: publicMembers(room.id)
       .slice(0, 4)
@@ -390,7 +391,7 @@ router.get(['/rooms/public', '/room', '/rooms/all'], (req, res) => {
 });
 
 /* Public room page: anyone holding the room code can see what
- * the room is and who is in it, but joining still needs an admin. */
+ * the room is and who is in it. Public rooms allow immediate viewing. */
 router.get('/rooms/public/:code', (req, res) => {
   const code = req.params.code.trim();
   const room = store.getRoomByCode(code);
@@ -401,7 +402,7 @@ router.get('/rooms/public/:code', (req, res) => {
   res.json({
     room: publicRoomSummary(room),
     members: publicMembers(room.id),
-    approvalRequired: true,
+    approvalRequired: room.visibility !== 'public',
     join: {
       page: `${origin}/room/${room.code}`,
       human: `Sign in, then GET ${origin}/api/join/${room.code}`,
@@ -902,16 +903,16 @@ router.get('/join/:code/status', (req, res) => {
     room: {
       ...publicRoomSummary(room),
       ...(membership ? { id: room.id } : {}),
+      visibility: room.visibility,
     },
     status,
     membership: membership ? { role: membership.role } : null,
     request: latest?.status === 'pending' ? { createdAt: latest.created_at } : null,
-    canRequest: !membership && status !== 'pending',
+    canRequest: (!membership || membership.role === 'viewer') && latest?.status !== 'pending',
   });
 });
 
-/* A signed-in human can request access with a plain GET. The request waits for
- * an admin; calling again while pending returns the same ticket. */
+/* A signed-in human can join any room to view it. Only members can chat. */
 router.get('/join/:code', (req, res) => {
   const principal = principalOf(req as AuthedRequest);
   userOnly(principal);
@@ -920,6 +921,41 @@ router.get('/join/:code', (req, res) => {
 
   const membership = store.getMembership(room.id, principal);
   if (membership) {
+    if (membership.role === 'viewer') {
+      const latest = store.getLatestJoinRequestForUser(room.id, principal.id);
+      if (latest?.status === 'pending') {
+        previewHeaders(res);
+        res.json({
+          status: 'member',
+          already: true,
+          room: { ...publicRoomSummary(room), id: room.id },
+          membership: { role: 'viewer' },
+          request: { createdAt: latest.created_at },
+          message: `Your request for chat access in "${room.name}" is waiting for an admin.`,
+        });
+        return;
+      }
+      const request = store.createJoinRequest(
+        room.id,
+        'user',
+        principal.name,
+        principal.email ?? '',
+        principal.id,
+      );
+      hub.broadcastJoinRequests(room.id);
+      previewHeaders(res);
+      res.status(202).json({
+        status: 'member',
+        already: false,
+        room: { ...publicRoomSummary(room), id: room.id },
+        membership: { role: 'viewer' },
+        request: { createdAt: request.created_at },
+        message: `Request sent. An admin of "${room.name}" needs to approve it for chat access.`,
+      });
+      return;
+    }
+
+    // Role is member or admin - they enter directly without needing permission again!
     previewHeaders(res);
     res.json({
       status: 'member',
@@ -930,34 +966,15 @@ router.get('/join/:code', (req, res) => {
     return;
   }
 
-  const latest = store.getLatestJoinRequestForUser(room.id, principal.id);
-  if (latest?.status === 'pending') {
-    previewHeaders(res);
-    res.json({
-      status: 'pending',
-      already: true,
-      room: publicRoomSummary(room),
-      request: { createdAt: latest.created_at },
-      message: `Your request to join "${room.name}" is waiting for an admin.`,
-    });
-    return;
-  }
-
-  const request = store.createJoinRequest(
-    room.id,
-    'user',
-    principal.name,
-    principal.email ?? '',
-    principal.id,
-  );
-  hub.broadcastJoinRequests(room.id);
+  // Anyone can join any room immediately as a viewer to see what is going on
+  store.addMember(room.id, principal, 'viewer');
+  hub.broadcastMembers(room.id);
   previewHeaders(res);
-  res.status(202).json({
-    status: 'pending',
+  res.json({
+    status: 'member',
     already: false,
-    room: publicRoomSummary(room),
-    request: { createdAt: request.created_at },
-    message: `Request sent. An admin of "${room.name}" needs to approve it.`,
+    room: { ...publicRoomSummary(room), id: room.id },
+    membership: { role: 'viewer' },
   });
 });
 
@@ -999,38 +1016,24 @@ router.post('/rooms/join', (req, res) => {
 
   const existing = store.getMembership(room.id, principal);
   if (existing) {
+    const latest = store.getLatestJoinRequestForUser(room.id, principal.id);
     res.json({
       status: 'member',
       room: { ...publicRoomSummary(room), id: room.id },
       membership: { role: existing.role },
+      request: latest?.status === 'pending' ? { createdAt: latest.created_at } : null,
       already: true,
     });
     return;
   }
 
-  const latest = store.getLatestJoinRequestForUser(room.id, principal.id);
-  if (latest?.status === 'pending') {
-    res.json({
-      status: 'pending',
-      room: publicRoomSummary(room),
-      request: { createdAt: latest.created_at },
-      already: true,
-    });
-    return;
-  }
-
-  const request = store.createJoinRequest(
-    room.id,
-    'user',
-    principal.name,
-    principal.email ?? '',
-    principal.id,
-  );
-  hub.broadcastJoinRequests(room.id);
-  res.status(202).json({
-    status: 'pending',
-    room: publicRoomSummary(room),
-    request: { createdAt: request.created_at },
+  // Anyone can join any room immediately as a viewer to see what is going on
+  store.addMember(room.id, principal, 'viewer');
+  hub.broadcastMembers(room.id);
+  res.json({
+    status: 'member',
+    room: { ...publicRoomSummary(room), id: room.id },
+    membership: { role: 'viewer' },
     already: false,
   });
 });
@@ -1085,16 +1088,13 @@ router.delete('/rooms/:roomId', (req, res) => {
 router.post('/rooms/:roomId/leave', (req, res) => {
   const principal = principalOf(req as AuthedRequest);
   userOnly(principal);
-  const membership = membershipOrThrow(req.params.roomId, principal);
-  if (membership.role === 'admin' && store.countRoomAdmins(req.params.roomId) <= 1) {
-    throw new HttpError(
-      409,
-      'You are the only admin of this room. Promote another admin or delete the room instead.',
-    );
-  }
-  store.leaveRoom(req.params.roomId, principal.id);
-  hub.broadcastMembers(req.params.roomId);
-  hub.evictFromRoom(req.params.roomId, 'user', principal.id, 'You left the room.');
+  membershipOrThrow(req.params.roomId, principal);
+
+  // Leaving a room means leaving the active room view to work in another room or browse rooms.
+  // Access and roles (admin/member) are fully preserved. Admin always stays admin!
+  hub.clearTyping(req.params.roomId, principal);
+  hub.broadcastPresence(req.params.roomId);
+
   res.json({ ok: true });
 });
 

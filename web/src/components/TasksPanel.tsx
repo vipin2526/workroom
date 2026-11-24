@@ -134,7 +134,13 @@ export function TasksPanel({
   }
 
   async function deleteTask(task: Task) {
-    if (!window.confirm(`Delete task “${task.title}”?`)) return;
+    const ok = await actions.confirm({
+      title: 'Delete task?',
+      message: `Delete task “${task.title}”? This action cannot be undone.`,
+      confirmText: 'Delete Task',
+      tone: 'danger',
+    });
+    if (!ok) return;
     setError(null);
     try {
       await actions.deleteTask(task.id);

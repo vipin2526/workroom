@@ -26,7 +26,7 @@ interface RoomCockpitProps {
   connected: boolean;
   voice: VoiceController;
   onOpenPanel: (tab: WorkspaceTab, intent?: WorkspacePanelIntent) => void;
-  onCopyInvite: () => void;
+  onCopyInvite?: () => void;
   onOpenMemberProfile: (type: PrincipalType, id: string) => void;
 }
 
@@ -129,17 +129,6 @@ export function RoomCockpit({
               {joinLabel}
             </button>
           )}
-          {state.room.code ? (
-            <button
-              type="button"
-              className="btn btn-ghost cockpit-invite"
-              onClick={onCopyInvite}
-              title="Copy the room link"
-            >
-              <CopyIcon size={13} />
-              <span>Invite</span>
-            </button>
-          ) : null}
         </div>
       </header>
 
@@ -294,11 +283,6 @@ export function RoomCockpit({
             <button type="button" className="cockpit-link" onClick={() => onOpenPanel('people')}>
               All people <span aria-hidden="true">→</span>
             </button>
-            {humans.length <= 1 && state.room.code ? (
-              <button type="button" className="cockpit-link accent" onClick={onCopyInvite}>
-                <CopyIcon size={11} /> Copy invite
-              </button>
-            ) : null}
           </footer>
         </section>
 

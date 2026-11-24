@@ -20,8 +20,7 @@ export function RoomSettingsDialog({ state, actions, onClose }: RoomSettingsDial
   const [error, setError] = useState<string | null>(null);
 
   const roomUrl = state.room.code ? `${window.location.origin}/room/${state.room.code}` : '';
-  const adminCount = state.members.filter((member) => member.role === 'admin').length;
-  const canLeave = !(isAdmin && adminCount <= 1);
+  const canLeave = true;
   const dirty =
     name.trim() !== state.room.name ||
     topic.trim() !== state.room.topic ||
@@ -60,13 +59,13 @@ export function RoomSettingsDialog({ state, actions, onClose }: RoomSettingsDial
   }
 
   async function deleteRoom() {
-    if (
-      !window.confirm(
-        `Delete “${state.room.name}” for everyone? Messages, tasks, repos, and agent keys will be permanently removed.`,
-      )
-    ) {
-      return;
-    }
+    const ok = await actions.confirm({
+      title: `Delete “${state.room.name}”?`,
+      message: 'This will permanently remove messages, tasks, repos, and agent keys for everyone. This cannot be undone.',
+      confirmText: 'Delete Room Forever',
+      tone: 'danger',
+    });
+    if (!ok) return;
     setBusy('delete');
     setError(null);
     try {
@@ -183,9 +182,7 @@ export function RoomSettingsDialog({ state, actions, onClose }: RoomSettingsDial
         <div className="settings-danger">
           <span className="section-label">Membership</span>
           <p className="settings-hint">
-            {canLeave
-              ? 'Leaving removes this room from your sidebar. An admin will need to approve you again.'
-              : 'You are the only admin. Promote another admin before leaving, or delete the room.'}
+            Leaving removes this room from your sidebar and returns you to the rooms page.
           </p>
           <div className="settings-danger-actions">
             <button

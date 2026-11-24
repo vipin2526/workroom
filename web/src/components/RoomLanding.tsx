@@ -97,6 +97,24 @@ export function RoomLanding({ code }: RoomLandingProps) {
     };
   }, [session?.user.id, code]);
 
+  useEffect(() => {
+    if (!session || !preview || join?.status === 'member') return;
+    let cancelled = false;
+    api
+      .joinRoom(code)
+      .then((data: JoinState) => {
+        if (!cancelled && data.status === 'member') {
+          setJoin(data);
+        }
+      })
+      .catch(() => {
+        // ignore error
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [session?.user.id, join?.status, code]);
+
   /* Once approved, refresh the preview so the member list includes the new member. */
   const prevJoinStatus = useRef<string | null>(null);
   useEffect(() => {
@@ -125,7 +143,7 @@ export function RoomLanding({ code }: RoomLandingProps) {
     const timer = window.setInterval(() => {
       api
         .joinStatus(code)
-        .then((data) => {
+        .then((data: JoinState) => {
           if (!cancelled) setJoin(data);
         })
         .catch(() => {
@@ -386,19 +404,32 @@ export function RoomLanding({ code }: RoomLandingProps) {
                   <span className="landing-card-icon">
                     <UsersIcon size={20} />
                   </span>
-                  <h2>Request to join</h2>
+                  <h2>{preview.approvalRequired ? 'Request to join' : 'Enter room'}</h2>
                   <p>
-                    {join?.status === 'denied'
-                      ? 'Your last request was declined. You can ask the admins again.'
-                      : 'This room is approval-only. Send a request and an admin will let you in.'}
+                    {preview.approvalRequired
+                      ? join?.status === 'denied'
+                        ? 'Your last request was declined. You can ask the admins again.'
+                        : 'This room is approval-only. Send a request and an admin will let you in.'
+                      : 'This is a public room. You can enter to view messages, tasks, and live activity.'}
                   </p>
                   <button
                     type="button"
                     className="btn btn-primary btn-block"
-                    onClick={requestAccess}
+                    onClick={async () => {
+                      if (!preview.approvalRequired) {
+                        try {
+                          const res = await api.joinRoom(code);
+                          if (res.status === 'member') setJoin(res);
+                        } catch {
+                          void requestAccess();
+                        }
+                      } else {
+                        void requestAccess();
+                      }
+                    }}
                     disabled={requesting}
                   >
-                    {requesting ? 'Sending request…' : 'Request access'}
+                    {requesting ? 'Connecting…' : preview.approvalRequired ? 'Request access' : 'Enter room'}
                   </button>
                   <p className="landing-stamp">Signed in as {session.user.name}</p>
                 </>
@@ -407,13 +438,14 @@ export function RoomLanding({ code }: RoomLandingProps) {
                   <span className="landing-card-icon">
                     <ShieldIcon size={20} />
                   </span>
-                  <h2>Sign in to join</h2>
+                  <h2>{preview.approvalRequired ? 'Sign in to join' : 'Sign in to enter'}</h2>
                   <p>
-                    Anyone with this link can preview the room. To chat and collaborate, sign in
-                    and request access — an admin approves it.
+                    {preview.approvalRequired
+                      ? 'Anyone with this link can preview the room. To chat and collaborate, sign in and request access.'
+                      : 'Anyone can join and view this public room. Sign in to enter and follow the room live.'}
                   </p>
                   <a className="btn btn-primary btn-block" href={signInHref}>
-                    Sign in and request access
+                    {preview.approvalRequired ? 'Sign in and request access' : 'Sign in to enter room'}
                   </a>
                   <a className="btn btn-quiet btn-block" href={signUpHref}>
                     Create an account
@@ -427,8 +459,9 @@ export function RoomLanding({ code }: RoomLandingProps) {
             <div className="landing-note">
               <ShieldIcon size={14} />
               <p>
-                Messages stay private until an admin admits you. The preview shows only the room
-                name, topic, and member list.
+                {preview.approvalRequired
+                  ? 'Messages stay private until an admin admits you. The preview shows only the room name, topic, and member list.'
+                  : 'This room is public. Anyone can join and see what is going on, but access is required for chat.'}
               </p>
             </div>
           </aside>

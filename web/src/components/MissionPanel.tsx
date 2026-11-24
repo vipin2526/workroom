@@ -119,7 +119,13 @@ function QuestionCard({ question, state, actions }: QuestionCardProps) {
   }
 
   async function remove() {
-    if (!window.confirm(`Delete the question “${question.title}”?`)) return;
+    const ok = await actions.confirm({
+      title: 'Delete question?',
+      message: `Delete the question “${question.title}”? This action cannot be undone.`,
+      confirmText: 'Delete Question',
+      tone: 'danger',
+    });
+    if (!ok) return;
     setBusy(true);
     setError(null);
     try {

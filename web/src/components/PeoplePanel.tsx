@@ -117,9 +117,13 @@ export function PeoplePanel({
   }
 
   async function rotateSecret(agent: Member) {
-    if (!window.confirm(`Rotate ${agent.name}'s trigger secret? The old secret stops working immediately.`)) {
-      return;
-    }
+    const ok = await actions.confirm({
+      title: `Rotate ${agent.name}’s trigger secret?`,
+      message: 'The old trigger secret stops working immediately. Any webhooks using it must be updated with the new secret.',
+      confirmText: 'Rotate Secret',
+      tone: 'warning',
+    });
+    if (!ok) return;
     setError(null);
     setRotating(agent.id);
     try {
@@ -134,13 +138,13 @@ export function PeoplePanel({
   }
 
   async function rotateKey(agent: Member) {
-    if (
-      !window.confirm(
-        `Rotate ${agent.name}'s connection key? The agent is disconnected immediately and the old key stops working.`,
-      )
-    ) {
-      return;
-    }
+    const ok = await actions.confirm({
+      title: `Rotate ${agent.name}’s connection key?`,
+      message: 'The agent will be disconnected immediately and the old key will stop working.',
+      confirmText: 'Rotate Key',
+      tone: 'warning',
+    });
+    if (!ok) return;
     setError(null);
     setRotatingKey(agent.id);
     try {
@@ -164,7 +168,13 @@ export function PeoplePanel({
   }
 
   async function remove(member: Member) {
-    if (!window.confirm(`Remove ${member.name} from the room?`)) return;
+    const ok = await actions.confirm({
+      title: `Remove ${member.name}?`,
+      message: `Are you sure you want to remove ${member.name} from the room?`,
+      confirmText: 'Remove Member',
+      tone: 'danger',
+    });
+    if (!ok) return;
     setError(null);
     try {
       await actions.removeMember(member);

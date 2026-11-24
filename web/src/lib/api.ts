@@ -163,6 +163,13 @@ export const api = {
     return request(`/join/${encodeURIComponent(code)}`);
   },
 
+  joinRoom(code: string): Promise<JoinState> {
+    return request('/rooms/join', {
+      method: 'POST',
+      body: { code },
+    });
+  },
+
   joinStatus(code: string): Promise<JoinState> {
     return request(`/join/${encodeURIComponent(code)}/status`);
   },

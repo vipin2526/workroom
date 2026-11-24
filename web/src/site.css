@@ -92,6 +92,26 @@
   text-decoration: none;
 }
 
+.site-profile-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: #101821;
+  text-decoration: none;
+  transition: border-color 0.15s ease;
+}
+
+.site-profile-chip:hover {
+  border-color: var(--accent);
+}
+
+.site-profile-chip .avatar {
+  border: none;
+}
+
 .site-menu-btn {
   display: none;
   width: 34px;
